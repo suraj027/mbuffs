@@ -367,13 +367,17 @@ export async function generateRecommendations(
         return { ...emptyResult, sourceCollections };
     }
     
-    // Get all movies the user already has in ANY of their collections (to filter out)
+    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
         FROM collection_movies cm
         JOIN collections c ON cm.collection_id = c.id
         WHERE c.owner_id = ${userId}
-        OR c.id IN (SELECT collection_id FROM collection_collaborators WHERE user_id = ${userId})
+        AND (
+            c.id::text = ANY(${sourceCollectionIds}::text[])
+            OR c.is_system = true
+        )
     `;
     const existingMovieIds = new Set(
         (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
@@ -697,13 +701,17 @@ export async function generateCategoryRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get all movies the user already has in ANY of their collections (to filter out)
+    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
         FROM collection_movies cm
         JOIN collections c ON cm.collection_id = c.id
         WHERE c.owner_id = ${userId}
-        OR c.id IN (SELECT collection_id FROM collection_collaborators WHERE user_id = ${userId})
+        AND (
+            c.id::text = ANY(${sourceCollectionIds}::text[])
+            OR c.is_system = true
+        )
     `;
     const existingMovieIds = new Set(
         (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
@@ -945,13 +953,17 @@ export async function generateGenreRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get all movies the user already has in ANY of their collections (to filter out)
+    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
         FROM collection_movies cm
         JOIN collections c ON cm.collection_id = c.id
         WHERE c.owner_id = ${userId}
-        OR c.id IN (SELECT collection_id FROM collection_collaborators WHERE user_id = ${userId})
+        AND (
+            c.id::text = ANY(${sourceCollectionIds}::text[])
+            OR c.is_system = true
+        )
     `;
     const existingMovieIds = new Set(
         (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
@@ -1174,13 +1186,17 @@ export async function generatePersonalizedTheatricalReleases(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get all movies the user already has in ANY of their collections (to filter out)
+    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
         FROM collection_movies cm
         JOIN collections c ON cm.collection_id = c.id
         WHERE c.owner_id = ${userId}
-        OR c.id IN (SELECT collection_id FROM collection_collaborators WHERE user_id = ${userId})
+        AND (
+            c.id::text = ANY(${sourceCollectionIds}::text[])
+            OR c.is_system = true
+        )
     `;
     const existingMovieIds = new Set(
         (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
