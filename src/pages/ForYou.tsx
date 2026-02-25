@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, Sparkles, Settings } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
+import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
 
 const ITEMS_PER_PAGE = 20;
@@ -66,6 +67,7 @@ const ForYou = () => {
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
+  const { notInterestedMap } = useNotInterestedStatus(recommendationsEnabled ? mediaIds : []);
 
   // Infinite scroll with Intersection Observer
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -191,7 +193,13 @@ const ForYou = () => {
                 const isTV = !!movie.first_air_date;
                 const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
                 return (
-                  <MovieCard key={`${movie.id}-${index}`} movie={movie} isWatched={watchedMap[mediaId] ?? false} />
+                  <MovieCard
+                    key={`${movie.id}-${index}`}
+                    movie={movie}
+                    isWatched={watchedMap[mediaId] ?? false}
+                    isNotInterested={notInterestedMap[mediaId] ?? false}
+                    showNotInterested={recommendationsEnabled}
+                  />
                 );
               })}
               {/* Skeleton loaders for infinite scroll - inside the same grid */}

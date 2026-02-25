@@ -222,9 +222,22 @@ export interface WatchedStatusResponse {
     watchedAt: string | null;
 }
 
+export interface SystemCollectionItem {
+    movie_id: string;
+    added_at: string;
+}
+
+export interface SystemCollectionItemsResponse {
+    items: SystemCollectionItem[];
+}
+
 export interface WatchedStatusBatchResponse {
     watchedStatus: Record<string, { isWatched: boolean; watchedAt: string | null }>;
 }
+
+export const fetchWatchedItemsApi = async (): Promise<SystemCollectionItemsResponse> => {
+    return fetchBackend('/collections/watched/items');
+};
 
 export const getWatchedStatusApi = async (mediaId: string): Promise<WatchedStatusResponse> => {
     return fetchBackend(`/collections/watched/${mediaId}`);
@@ -239,6 +252,37 @@ export const getWatchedStatusBatchApi = async (mediaIds: string[]): Promise<Watc
 
 export const toggleWatchedStatusApi = async (mediaId: string): Promise<WatchedStatusResponse> => {
     return fetchBackend(`/collections/watched/${mediaId}/toggle`, {
+        method: 'POST',
+    });
+};
+
+// --- Not Interested Status API ---
+export interface NotInterestedStatusResponse {
+    isNotInterested: boolean;
+    notInterestedAt: string | null;
+}
+
+export interface NotInterestedStatusBatchResponse {
+    notInterestedStatus: Record<string, { isNotInterested: boolean; notInterestedAt: string | null }>;
+}
+
+export const fetchNotInterestedItemsApi = async (): Promise<SystemCollectionItemsResponse> => {
+    return fetchBackend('/collections/not-interested/items');
+};
+
+export const getNotInterestedStatusApi = async (mediaId: string): Promise<NotInterestedStatusResponse> => {
+    return fetchBackend(`/collections/not-interested/${mediaId}`);
+};
+
+export const getNotInterestedStatusBatchApi = async (mediaIds: string[]): Promise<NotInterestedStatusBatchResponse> => {
+    return fetchBackend('/collections/not-interested/batch', {
+        method: 'POST',
+        body: JSON.stringify({ mediaIds }),
+    });
+};
+
+export const toggleNotInterestedStatusApi = async (mediaId: string): Promise<NotInterestedStatusResponse> => {
+    return fetchBackend(`/collections/not-interested/${mediaId}/toggle`, {
         method: 'POST',
     });
 };

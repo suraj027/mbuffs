@@ -10,9 +10,14 @@ import {
      addCollaborator,
      updateCollaboratorPermission,
     removeCollaborator,
+    getWatchedItems,
     getWatchedStatus,
     getWatchedStatusBatch,
-    toggleWatchedStatus
+    toggleWatchedStatus,
+    getNotInterestedItems,
+    getNotInterestedStatus,
+    getNotInterestedStatusBatch,
+    toggleNotInterestedStatus
 } from '../controllers/collectionController.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 import { requireCollectionPermission } from '../middleware/collectionAuthMiddleware.js';
@@ -77,8 +82,15 @@ router.delete(
 );
 
 // Watched status routes (system collection)
+router.get('/watched/items', requireAuth as RequestHandler, getWatchedItems as RequestHandler);
 router.get('/watched/:mediaId', requireAuth as RequestHandler, getWatchedStatus as RequestHandler);
 router.post('/watched/batch', requireAuth as RequestHandler, getWatchedStatusBatch as RequestHandler);
 router.post('/watched/:mediaId/toggle', requireAuth as RequestHandler, toggleWatchedStatus as RequestHandler);
+
+// Not interested routes (system collection)
+router.get('/not-interested/items', requireAuth as RequestHandler, getNotInterestedItems as RequestHandler);
+router.get('/not-interested/:mediaId', requireAuth as RequestHandler, getNotInterestedStatus as RequestHandler);
+router.post('/not-interested/batch', requireAuth as RequestHandler, getNotInterestedStatusBatch as RequestHandler);
+router.post('/not-interested/:mediaId/toggle', requireAuth as RequestHandler, toggleNotInterestedStatus as RequestHandler);
 
 export default router;

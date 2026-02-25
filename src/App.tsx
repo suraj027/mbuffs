@@ -33,6 +33,8 @@ import MovieDetail from './pages/MovieDetail';
 import SeasonDetail from './pages/SeasonDetail';
 import PersonDetail from './pages/PersonDetail';
 import ForYou from './pages/ForYou';
+import WatchedItems from './pages/WatchedItems';
+import NotInterestedItems from './pages/NotInterestedItems';
 
 // AuthProvider wrapper to initialize auth and handle token from URL
 const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -88,6 +90,22 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <CollectionDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/watched"
+            element={
+              <ProtectedRoute>
+                <WatchedItems />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/not-interested"
+            element={
+              <ProtectedRoute>
+                <NotInterestedItems />
               </ProtectedRoute>
             }
           />

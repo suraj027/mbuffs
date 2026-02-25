@@ -89,17 +89,17 @@ const Categories = () => {
 
           <TabsContent value="movie">
             {showPersonalized ? (
-              <PersonalizedCategoriesContent mediaType="movie" />
+              <PersonalizedCategoriesContent mediaType="movie" showNotInterested={showPersonalized} />
             ) : (
-              <GenreRowsContent mediaType="movie" featuredGenreIds={FEATURED_MOVIE_GENRE_IDS} />
+              <GenreRowsContent mediaType="movie" featuredGenreIds={FEATURED_MOVIE_GENRE_IDS} showNotInterested={false} />
             )}
           </TabsContent>
 
           <TabsContent value="tv">
             {showPersonalized ? (
-              <PersonalizedCategoriesContent mediaType="tv" />
+              <PersonalizedCategoriesContent mediaType="tv" showNotInterested={showPersonalized} />
             ) : (
-              <GenreRowsContent mediaType="tv" featuredGenreIds={FEATURED_TV_GENRE_IDS} />
+              <GenreRowsContent mediaType="tv" featuredGenreIds={FEATURED_TV_GENRE_IDS} showNotInterested={false} />
             )}
           </TabsContent>
         </Tabs>
@@ -134,7 +134,7 @@ function CategoriesLoadingSkeleton() {
 }
 
 // Component to render personalized category recommendations
-function PersonalizedCategoriesContent({ mediaType }: { mediaType: 'movie' | 'tv' }) {
+function PersonalizedCategoriesContent({ mediaType, showNotInterested }: { mediaType: 'movie' | 'tv'; showNotInterested: boolean }) {
   const { data, isLoading, isError } = useQuery<CategoryRecommendationsResponse>({
     queryKey: ['recommendations', 'categories', mediaType],
     queryFn: () => fetchCategoryRecommendationsApi(mediaType, 10),
@@ -151,13 +151,14 @@ function PersonalizedCategoriesContent({ mediaType }: { mediaType: 'movie' | 'tv
       <GenreRowsContent 
         mediaType={mediaType} 
         featuredGenreIds={mediaType === 'movie' ? FEATURED_MOVIE_GENRE_IDS : FEATURED_TV_GENRE_IDS} 
+        showNotInterested={showNotInterested}
       />
     );
   }
 
   return (
     <div className="space-y-12">
-      {mediaType === 'movie' && <PersonalizedTheatricalReleasesRow />}
+      {mediaType === 'movie' && <PersonalizedTheatricalReleasesRow showNotInterested={showNotInterested} />}
       {data.categories.map((category) => (
         <GenreRow
           key={`personalized-${mediaType}-${category.genre.id}`}
@@ -167,6 +168,7 @@ function PersonalizedCategoriesContent({ mediaType }: { mediaType: 'movie' | 'tv
           isLoading={false}
           limit={10}
           isPersonalized
+          showNotInterested={showNotInterested}
         />
       ))}
     </div>
@@ -174,7 +176,7 @@ function PersonalizedCategoriesContent({ mediaType }: { mediaType: 'movie' | 'tv
 }
 
 // Component to render genre rows for a specific media type
-function GenreRowsContent({ mediaType, featuredGenreIds }: { mediaType: 'movie' | 'tv'; featuredGenreIds: number[] }) {
+function GenreRowsContent({ mediaType, featuredGenreIds, showNotInterested = false }: { mediaType: 'movie' | 'tv'; featuredGenreIds: number[]; showNotInterested?: boolean }) {
   // Fetch genre list
   const { data: genreData, isLoading: isLoadingGenres } = useQuery({
     queryKey: ['genres', mediaType],
@@ -193,12 +195,13 @@ function GenreRowsContent({ mediaType, featuredGenreIds }: { mediaType: 'movie' 
 
   return (
     <div className="space-y-12">
-      {mediaType === 'movie' && <TheatricalReleasesRow />}
+      {mediaType === 'movie' && <TheatricalReleasesRow showNotInterested={showNotInterested} />}
       {featuredGenres.map((genre) => (
         <GenreRowWithData
           key={`${mediaType}-${genre.id}`}
           genre={genre}
           mediaType={mediaType}
+          showNotInterested={showNotInterested}
         />
       ))}
     </div>
@@ -206,7 +209,7 @@ function GenreRowsContent({ mediaType, featuredGenreIds }: { mediaType: 'movie' 
 }
 
 // Separate component to fetch data for each genre row
-function GenreRowWithData({ genre, mediaType }: { genre: Genre; mediaType: 'movie' | 'tv' }) {
+function GenreRowWithData({ genre, mediaType, showNotInterested = false }: { genre: Genre; mediaType: 'movie' | 'tv'; showNotInterested?: boolean }) {
   const { data, isLoading } = useQuery({
     queryKey: ['genre', mediaType, genre.id, 'preview'],
     queryFn: () => mediaType === 'movie'
@@ -222,11 +225,12 @@ function GenreRowWithData({ genre, mediaType }: { genre: Genre; mediaType: 'movi
       mediaType={mediaType}
       isLoading={isLoading}
       limit={10}
+      showNotInterested={showNotInterested}
     />
   );
 }
 
-function TheatricalReleasesRow() {
+function TheatricalReleasesRow({ showNotInterested = false }: { showNotInterested?: boolean }) {
   const { data, isLoading } = useQuery({
     queryKey: ['movies', 'now_playing'],
     queryFn: () => fetchNowPlayingMoviesApi(1),
@@ -241,11 +245,12 @@ function TheatricalReleasesRow() {
       isLoading={isLoading}
       limit={10}
       customLink="/categories/movie/now-playing"
+      showNotInterested={showNotInterested}
     />
   );
 }
 
-function PersonalizedTheatricalReleasesRow() {
+function PersonalizedTheatricalReleasesRow({ showNotInterested = true }: { showNotInterested?: boolean }) {
   const { data, isLoading } = useQuery({
     queryKey: ['recommendations', 'theatrical', 'preview'],
     queryFn: () => fetchTheatricalRecommendationsApi(10, 1),
@@ -261,6 +266,7 @@ function PersonalizedTheatricalReleasesRow() {
       limit={10}
       customLink="/categories/movie/now-playing"
       isPersonalized
+      showNotInterested={showNotInterested}
     />
   );
 }

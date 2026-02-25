@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchMovieDetailsApi, fetchTvDetailsApi, fetchVideosApi, fetchCreditsApi, fetchPersonCreditsApi, fetchUserCollectionsApi, fetchCollectionDetailsApi, addMovieToCollectionApi, removeMovieFromCollectionApi, getImageUrl, fetchUserRegion, fetchTmdbCollectionDetailsApi, fetchCombinedRatingsApi, getWatchedStatusApi, toggleWatchedStatusApi } from '@/lib/api';
-import { MovieDetails, Network, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse } from '@/lib/types';
+import { fetchMovieDetailsApi, fetchTvDetailsApi, fetchVideosApi, fetchCreditsApi, fetchPersonCreditsApi, fetchUserCollectionsApi, fetchCollectionDetailsApi, addMovieToCollectionApi, removeMovieFromCollectionApi, getImageUrl, fetchUserRegion, fetchTmdbCollectionDetailsApi, fetchCombinedRatingsApi, getWatchedStatusApi, toggleWatchedStatusApi, getNotInterestedStatusApi, toggleNotInterestedStatusApi, fetchUserPreferencesApi } from '@/lib/api';
+import { MovieDetails, Network, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Clock, Calendar, Globe, Share2, X, MessageSquare, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Clock, Calendar, Globe, Share2, X, MessageSquare, ChevronRight, Eye, EyeOff, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -137,6 +137,17 @@ const MovieDetail = () => {
 
     const isMovie = mediaType === 'movie';
     const queryKey = [mediaType, 'details', mediaId];
+
+    const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
+        queryKey: ['user', 'preferences'],
+        queryFn: fetchUserPreferencesApi,
+        enabled: isLoggedIn,
+        staleTime: 1000 * 60 * 5,
+    });
+
+    const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
+    const showNotInterested = isLoggedIn && recommendationsEnabled;
+    const activeActionClass = 'bg-white/12 border-white/20 text-foreground';
 
     const { data: mediaDetails, isLoading, isError, error } = useQuery<MovieDetails, Error>({
         queryKey: queryKey,
@@ -368,6 +379,7 @@ const MovieDetail = () => {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['watched'] });
             queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
+            queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
         },
         onError: (_error: Error, _, context) => {
             // Rollback on error
@@ -375,6 +387,45 @@ const MovieDetail = () => {
                 queryClient.setQueryData(watchedQueryKey, context.previousData);
             }
             toast.error('Failed to update watched status');
+        },
+    });
+
+    // Not interested status query and mutation
+    const notInterestedQueryKey = ['notInterested', collectionMediaId];
+
+    const { data: notInterestedData, isLoading: isLoadingNotInterested } = useQuery({
+        queryKey: notInterestedQueryKey,
+        queryFn: () => getNotInterestedStatusApi(collectionMediaId!),
+        enabled: !!collectionMediaId && showNotInterested,
+    });
+
+    const isNotInterested = notInterestedData?.isNotInterested ?? false;
+
+    const toggleNotInterestedMutation = useMutation({
+        mutationFn: () => toggleNotInterestedStatusApi(collectionMediaId!),
+        onMutate: async () => {
+            await queryClient.cancelQueries({ queryKey: notInterestedQueryKey });
+            await queryClient.cancelQueries({ queryKey: ['notInterestedBatch'] });
+
+            const previousData = queryClient.getQueryData<{ isNotInterested: boolean; notInterestedAt: string | null }>(notInterestedQueryKey);
+
+            queryClient.setQueryData(notInterestedQueryKey, {
+                isNotInterested: !isNotInterested,
+                notInterestedAt: isNotInterested ? null : new Date().toISOString(),
+            });
+
+            return { previousData };
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['notInterested'] });
+            queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
+            queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
+        },
+        onError: (_error: Error, _, context) => {
+            if (context?.previousData) {
+                queryClient.setQueryData(notInterestedQueryKey, context.previousData);
+            }
+            toast.error('Failed to update not interested status');
         },
     });
 
@@ -604,7 +655,7 @@ const MovieDetail = () => {
                                 <PopoverTrigger asChild>
                                     <Button
                                         variant="outline"
-                                        className="border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
+                                        className="w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
                                     >
                                         <Bookmark className={`h-4 w-4 ${isInAnyCollection ? 'fill-current' : ''}`} />
                                         <span>Save</span>
@@ -698,19 +749,36 @@ const MovieDetail = () => {
                             
                             {/* Watched Button - Mobile */}
                             {isLoggedIn && (
-                                <Button
-                                    variant="outline"
-                                    className={`border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? 'bg-primary/20 border-primary/30' : ''}`}
-                                    onClick={() => toggleWatchedMutation.mutate()}
-                                    disabled={isLoadingWatched}
-                                >
-                                    {isWatched ? (
-                                        <EyeOff className="h-4 w-4" />
-                                    ) : (
-                                        <Eye className="h-4 w-4" />
+                                <>
+                                    <Button
+                                        variant="outline"
+                                        className={`w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
+                                        onClick={() => toggleWatchedMutation.mutate()}
+                                        disabled={isLoadingWatched}
+                                    >
+                                        {isWatched ? (
+                                            <EyeOff className="h-4 w-4" />
+                                        ) : (
+                                            <Eye className="h-4 w-4" />
+                                        )}
+                                        <span>{isWatched ? 'Unwatch' : 'Watched'}</span>
+                                    </Button>
+                                    {showNotInterested && (
+                                        <Button
+                                            variant="outline"
+                                            className={`w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
+                                            onClick={() => toggleNotInterestedMutation.mutate()}
+                                            disabled={isLoadingNotInterested}
+                                        >
+                                            {isNotInterested ? (
+                                                <ThumbsUp className="h-4 w-4" />
+                                            ) : (
+                                                <ThumbsDown className="h-4 w-4" />
+                                            )}
+                                            <span>{isNotInterested ? 'Interested?' : 'Not interested?'}</span>
+                                        </Button>
                                     )}
-                                    <span>{isWatched ? 'Unwatch' : 'Watched'}</span>
-                                </Button>
+                                </>
                             )}
                         </div>
 
@@ -751,7 +819,7 @@ const MovieDetail = () => {
                                             <PopoverTrigger asChild>
                                                 <Button
                                                     variant="outline"
-                                                    className="w-36 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
+                                                    className="w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
                                                 >
                                                     <Bookmark className={`h-4 w-4 ${isInAnyCollection ? 'fill-current' : ''}`} />
                                                     <span>Save</span>
@@ -845,19 +913,36 @@ const MovieDetail = () => {
                                         
                                         {/* Watched Button - Desktop */}
                                         {isLoggedIn && (
-                                            <Button
-                                                variant="outline"
-                                                className={`w-36 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? 'bg-primary/20 border-primary/30' : ''}`}
-                                                onClick={() => toggleWatchedMutation.mutate()}
-                                                disabled={isLoadingWatched}
-                                            >
-                                                {isWatched ? (
-                                                    <EyeOff className="h-4 w-4" />
-                                                ) : (
-                                                    <Eye className="h-4 w-4" />
+                                            <>
+                                                <Button
+                                                    variant="outline"
+                                                    className={`w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
+                                                    onClick={() => toggleWatchedMutation.mutate()}
+                                                    disabled={isLoadingWatched}
+                                                >
+                                                    {isWatched ? (
+                                                        <EyeOff className="h-4 w-4" />
+                                                    ) : (
+                                                        <Eye className="h-4 w-4" />
+                                                    )}
+                                                    <span>{isWatched ? 'Unwatch' : 'Watched'}</span>
+                                                </Button>
+                                                {showNotInterested && (
+                                                    <Button
+                                                        variant="outline"
+                                                        className={`w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
+                                                        onClick={() => toggleNotInterestedMutation.mutate()}
+                                                        disabled={isLoadingNotInterested}
+                                                    >
+                                                        {isNotInterested ? (
+                                                            <ThumbsUp className="h-4 w-4" />
+                                                        ) : (
+                                                            <ThumbsDown className="h-4 w-4" />
+                                                        )}
+                                                        <span>{isNotInterested ? 'Interested?' : 'Not interested?'}</span>
+                                                    </Button>
                                                 )}
-                                                <span>{isWatched ? 'Unwatch' : 'Watched'}</span>
-                                            </Button>
+                                            </>
                                         )}
                                     </div>
                                 </div>

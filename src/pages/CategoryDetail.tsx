@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
+import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
 
 const ITEMS_PER_PAGE = 20;
@@ -39,6 +40,7 @@ const CategoryDetail = () => {
   const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
   const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
   const showPersonalized = Boolean(user && categoryRecommendationsEnabled && recommendationsEnabled);
+  const showNotInterested = recommendationsEnabled && categoryRecommendationsEnabled;
 
   // Fetch genre name
   const { data: genreData } = useQuery({
@@ -133,6 +135,7 @@ const CategoryDetail = () => {
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
+  const { notInterestedMap } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
 
   // Infinite scroll with Intersection Observer
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -220,7 +223,13 @@ const CategoryDetail = () => {
                 const isTV = mediaType === 'tv' || !!movie.first_air_date;
                 const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
                 return (
-                  <MovieCard key={`${movie.id}-${index}`} movie={movie} isWatched={watchedMap[mediaId] ?? false} />
+                  <MovieCard
+                    key={`${movie.id}-${index}`}
+                    movie={movie}
+                    isWatched={watchedMap[mediaId] ?? false}
+                    isNotInterested={notInterestedMap[mediaId] ?? false}
+                    showNotInterested={showNotInterested}
+                  />
                 );
               })}
               {/* Skeleton loaders for infinite scroll - inside the same grid */}

@@ -367,7 +367,8 @@ export async function generateRecommendations(
         return { ...emptyResult, sourceCollections };
     }
     
-    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    // Get movies to exclude: only from source collections and system collections
+    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
@@ -701,7 +702,8 @@ export async function generateCategoryRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    // Get movies to exclude: only from source collections and system collections
+    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
@@ -953,7 +955,8 @@ export async function generateGenreRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    // Get movies to exclude: only from source collections and system collections
+    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id
@@ -1186,7 +1189,8 @@ export async function generatePersonalizedTheatricalReleases(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections (like __watched__)
+    // Get movies to exclude: only from source collections and system collections
+    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMoviesResult = await sql`
         SELECT DISTINCT cm.movie_id

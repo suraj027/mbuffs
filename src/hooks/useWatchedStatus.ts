@@ -10,7 +10,7 @@ export function useWatchedStatus(mediaIds: string[]) {
     const { isLoggedIn } = useAuth();
     
     const { data, isLoading } = useQuery({
-        queryKey: ['watchedBatch', ...mediaIds.sort()],
+        queryKey: ['watchedBatch', ...[...mediaIds].sort()],
         queryFn: () => getWatchedStatusBatchApi(mediaIds),
         enabled: isLoggedIn && mediaIds.length > 0,
         staleTime: 30000, // Consider data fresh for 30 seconds

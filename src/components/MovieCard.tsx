@@ -1,23 +1,32 @@
 import { Movie } from "@/lib/types";
-import { getImageUrl, toggleWatchedStatusApi } from "@/lib/api";
-import { Star, Eye, EyeOff, MoreVertical } from "lucide-react";
+import { getImageUrl, toggleNotInterestedStatusApi, toggleWatchedStatusApi } from "@/lib/api";
+import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { useState, ReactNode, useEffect, useRef } from "react";
+import { useState, ReactNode } from "react";
 
 interface MovieCardProps {
   movie: Movie;
   onClick?: () => void;
   isWatched?: boolean;
+  isNotInterested?: boolean;
+  showNotInterested?: boolean;
   /** Additional menu items to render after the watched option */
   additionalMenuItems?: ReactNode;
 }
 
-export function MovieCard({ movie, onClick, isWatched = false, additionalMenuItems }: MovieCardProps) {
+export function MovieCard({
+  movie,
+  onClick,
+  isWatched = false,
+  isNotInterested = false,
+  showNotInterested = false,
+  additionalMenuItems
+}: MovieCardProps) {
   const releaseYear = (movie.release_date || movie.first_air_date) 
     ? new Date(movie.first_air_date || movie.release_date).getFullYear() 
     : "Unknown";
@@ -29,42 +38,69 @@ export function MovieCard({ movie, onClick, isWatched = false, additionalMenuIte
   const { isLoggedIn } = useAuth();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
-  
-  // Track the displayed watched state locally for optimistic updates
-  const [localWatched, setLocalWatched] = useState(isWatched);
-  const isPendingRef = useRef(false);
-  
-  // Sync with prop when not in a pending state
-  useEffect(() => {
-    if (!isPendingRef.current) {
-      setLocalWatched(isWatched);
-    }
-  }, [isWatched]);
+  const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-white/10 focus:text-foreground data-[highlighted]:bg-white/10 data-[highlighted]:text-foreground";
+
+  // Local optimistic overlays. We only use them while they differ from server props.
+  const [optimisticWatched, setOptimisticWatched] = useState<boolean | null>(null);
+  const [optimisticNotInterested, setOptimisticNotInterested] = useState<boolean | null>(null);
+
+  const displayedWatched =
+    optimisticWatched !== null && optimisticWatched !== isWatched
+      ? optimisticWatched
+      : isWatched;
+
+  const displayedNotInterested =
+    optimisticNotInterested !== null && optimisticNotInterested !== isNotInterested
+      ? optimisticNotInterested
+      : isNotInterested;
 
   const toggleWatchedMutation = useMutation({
     mutationFn: () => toggleWatchedStatusApi(mediaId),
     onMutate: async () => {
-      isPendingRef.current = true;
-      const newValue = !localWatched;
-      setLocalWatched(newValue);
+      const newValue = !displayedWatched;
+      setOptimisticWatched(newValue);
       
       await queryClient.cancelQueries({ queryKey: ['watched', mediaId] });
       await queryClient.cancelQueries({ queryKey: ['watchedBatch'] });
       
-      return { previousWatched: localWatched };
+      return { previousWatched: displayedWatched };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setOptimisticWatched(data.isWatched);
       queryClient.invalidateQueries({ queryKey: ['watched'] });
       queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
-    },
-    onSettled: () => {
-      isPendingRef.current = false;
+      queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
     },
     onError: (_error: Error, _, context) => {
       if (context) {
-        setLocalWatched(context.previousWatched);
+        setOptimisticWatched(context.previousWatched);
       }
       toast.error('Failed to update watched status');
+    },
+  });
+
+  const toggleNotInterestedMutation = useMutation({
+    mutationFn: () => toggleNotInterestedStatusApi(mediaId),
+    onMutate: async () => {
+      const newValue = !displayedNotInterested;
+      setOptimisticNotInterested(newValue);
+
+      await queryClient.cancelQueries({ queryKey: ['notInterested', mediaId] });
+      await queryClient.cancelQueries({ queryKey: ['notInterestedBatch'] });
+
+      return { previousNotInterested: displayedNotInterested };
+    },
+    onSuccess: (data) => {
+      setOptimisticNotInterested(data.isNotInterested);
+      queryClient.invalidateQueries({ queryKey: ['notInterested'] });
+      queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
+      queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
+    },
+    onError: (_error: Error, _, context) => {
+      if (context) {
+        setOptimisticNotInterested(context.previousNotInterested);
+      }
+      toast.error('Failed to update not interested status');
     },
   });
 
@@ -74,6 +110,17 @@ export function MovieCard({ movie, onClick, isWatched = false, additionalMenuIte
       return;
     }
     toggleWatchedMutation.mutate();
+  };
+
+  const handleNotInterestedClick = () => {
+    if (!showNotInterested) {
+      return;
+    }
+    if (!isLoggedIn) {
+      toast.error('Please sign in to mark as not interested');
+      return;
+    }
+    toggleNotInterestedMutation.mutate();
   };
 
   return (
@@ -102,30 +149,50 @@ export function MovieCard({ movie, onClick, isWatched = false, additionalMenuIte
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`h-7 w-7 rounded-full bg-black/50 border-0 hover:bg-black/70 transition-opacity ${
-                      menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    className={`h-7 w-7 rounded-full bg-black/55 border border-white/10 hover:bg-black/75 transition-opacity ${
+                      menuOpen ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
                     }`}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   >
                     <MoreVertical className="h-4 w-4 text-white" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuContent
+                  align="end"
+                  className="w-44 rounded-xl border-white/15 bg-[#0d1424]/95 p-1.5 shadow-2xl shadow-black/45 backdrop-blur-xl"
+                >
                   <DropdownMenuItem
-                    className="cursor-pointer"
+                    className={menuItemClass}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       handleWatchedClick();
                     }}
                   >
-                    {localWatched ? (
-                      <EyeOff className="h-4 w-4 mr-2" />
+                    {displayedWatched ? (
+                      <EyeOff className="h-4 w-4 mr-2 text-foreground/80" />
                     ) : (
-                      <Eye className="h-4 w-4 mr-2" />
+                      <Eye className="h-4 w-4 mr-2 text-foreground/80" />
                     )}
-                    {localWatched ? 'Unwatch' : 'Watched'}
+                    <span className="whitespace-nowrap">{displayedWatched ? 'Unwatch' : 'Watched'}</span>
                   </DropdownMenuItem>
+                  {showNotInterested && (
+                    <DropdownMenuItem
+                      className={menuItemClass}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleNotInterestedClick();
+                      }}
+                    >
+                      {displayedNotInterested ? (
+                        <ThumbsUp className="h-4 w-4 mr-2 text-emerald-300" />
+                      ) : (
+                        <ThumbsDown className="h-4 w-4 mr-2 text-amber-300" />
+                      )}
+                      <span className="whitespace-nowrap">{displayedNotInterested ? 'Interested?' : 'Not interested?'}</span>
+                    </DropdownMenuItem>
+                  )}
                   {additionalMenuItems}
                 </DropdownMenuContent>
               </DropdownMenu>

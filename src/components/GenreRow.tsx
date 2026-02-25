@@ -4,6 +4,7 @@ import { Movie, Genre } from "@/lib/types";
 import { MovieCard } from "./MovieCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
+import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { useMemo } from "react";
 
 export interface GenreRowProps {
@@ -16,9 +17,21 @@ export interface GenreRowProps {
   hideSeeAll?: boolean;
   customLink?: string;
   isPersonalized?: boolean;
+  showNotInterested?: boolean;
 }
 
-export function GenreRow({ genre, title, movies, mediaType, isLoading = false, limit = 10, hideSeeAll = false, customLink, isPersonalized = false }: GenreRowProps) {
+export function GenreRow({
+  genre,
+  title,
+  movies,
+  mediaType,
+  isLoading = false,
+  limit = 10,
+  hideSeeAll = false,
+  customLink,
+  isPersonalized = false,
+  showNotInterested = false
+}: GenreRowProps) {
   const displayMovies = movies.slice(0, limit);
   
   // Generate media IDs for watched status lookup
@@ -31,6 +44,7 @@ export function GenreRow({ genre, title, movies, mediaType, isLoading = false, l
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
+  const { notInterestedMap } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
 
   if (isLoading) {
     return (
@@ -95,7 +109,12 @@ export function GenreRow({ genre, title, movies, mediaType, isLoading = false, l
                 key={movie.id}
                 className="shrink-0 w-[140px] sm:w-[160px] md:w-[180px]"
               >
-                <MovieCard movie={movie} isWatched={watchedMap[mediaId] ?? false} />
+                <MovieCard
+                  movie={movie}
+                  isWatched={watchedMap[mediaId] ?? false}
+                  isNotInterested={notInterestedMap[mediaId] ?? false}
+                  showNotInterested={showNotInterested}
+                />
               </div>
             );
           })}

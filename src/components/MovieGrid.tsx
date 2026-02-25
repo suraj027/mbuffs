@@ -1,14 +1,16 @@
 import { Movie } from "@/lib/types";
 import { MovieCard } from "./MovieCard";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
+import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { useMemo } from "react";
 
 interface MovieGridProps {
   movies: Movie[];
   title?: string;
+  showNotInterested?: boolean;
 }
 
-export function MovieGrid({ movies, title }: MovieGridProps) {
+export function MovieGrid({ movies, title, showNotInterested = false }: MovieGridProps) {
   // Generate media IDs for watched status lookup
   const mediaIds = useMemo(() => 
     movies.map(movie => {
@@ -19,6 +21,7 @@ export function MovieGrid({ movies, title }: MovieGridProps) {
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
+  const { notInterestedMap } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
 
   if (movies.length === 0) {
     return (
@@ -50,6 +53,8 @@ export function MovieGrid({ movies, title }: MovieGridProps) {
               key={movie.id}
               movie={movie}
               isWatched={watchedMap[mediaId] ?? false}
+              isNotInterested={notInterestedMap[mediaId] ?? false}
+              showNotInterested={showNotInterested}
             />
           );
         })}

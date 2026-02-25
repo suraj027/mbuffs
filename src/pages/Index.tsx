@@ -7,6 +7,7 @@ import { Navbar } from "@/components/Navbar";
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { useWatchedStatus } from '@/hooks/useWatchedStatus';
+import { useNotInterestedStatus } from '@/hooks/useNotInterestedStatus';
 import { Sparkles, Settings, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -70,6 +71,7 @@ const Index = () => {
   );
 
   const { watchedMap } = useWatchedStatus(recommendationMediaIds);
+  const { notInterestedMap } = useNotInterestedStatus(recommendationsEnabled ? recommendationMediaIds : []);
 
   // For You scroll functionality
   const forYouScrollRef = useRef<HTMLDivElement>(null);
@@ -159,7 +161,12 @@ const Index = () => {
                         const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
                         return (
                           <div key={movie.id} className="shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
-                            <MovieCard movie={movie} isWatched={watchedMap[mediaId] ?? false} />
+                            <MovieCard
+                              movie={movie}
+                              isWatched={watchedMap[mediaId] ?? false}
+                              isNotInterested={notInterestedMap[mediaId] ?? false}
+                              showNotInterested={recommendationsEnabled}
+                            />
                           </div>
                         );
                       })}

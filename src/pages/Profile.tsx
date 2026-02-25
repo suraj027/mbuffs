@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchUserCollectionsApi, updateUserPreferencesApi, fetchRecommendationCollectionsApi, setRecommendationCollectionsApi, fetchUserPreferencesApi } from '@/lib/api';
+import { fetchUserCollectionsApi, updateUserPreferencesApi, fetchRecommendationCollectionsApi, setRecommendationCollectionsApi, fetchUserPreferencesApi, fetchWatchedItemsApi, fetchNotInterestedItemsApi } from '@/lib/api';
 import { UserCollectionsResponse, UpdateUserPreferencesInput, RecommendationCollectionsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -13,13 +13,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3 } from 'lucide-react';
+import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight } from 'lucide-react';
 import { toast } from "sonner";
+import { Link } from 'react-router-dom';
 
 const COLLECTIONS_QUERY_KEY = ['collections', 'user'];
 const USER_QUERY_KEY = ['user'];
 const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
 const PREFERENCES_QUERY_KEY = ['user', 'preferences'];
+const WATCHED_ITEMS_QUERY_KEY = ['collections', 'watched', 'items'];
+const NOT_INTERESTED_ITEMS_QUERY_KEY = ['collections', 'not-interested', 'items'];
 
 const Profile = () => {
     const queryClient = useQueryClient();
@@ -53,6 +56,24 @@ const Profile = () => {
         queryKey: RECOMMENDATION_COLLECTIONS_QUERY_KEY,
         queryFn: fetchRecommendationCollectionsApi,
         enabled: !!user && (preferencesData?.preferences?.recommendations_enabled ?? false),
+    });
+
+    const {
+        data: watchedItemsData,
+        isLoading: isLoadingWatchedItems,
+    } = useQuery({
+        queryKey: WATCHED_ITEMS_QUERY_KEY,
+        queryFn: fetchWatchedItemsApi,
+        enabled: !!user,
+    });
+
+    const {
+        data: notInterestedItemsData,
+        isLoading: isLoadingNotInterestedItems,
+    } = useQuery({
+        queryKey: NOT_INTERESTED_ITEMS_QUERY_KEY,
+        queryFn: fetchNotInterestedItemsApi,
+        enabled: !!user,
     });
 
     // Mutation for updating preferences with optimistic updates
@@ -204,6 +225,8 @@ const Profile = () => {
     const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
     const selectedCollectionIds = new Set(recommendationCollectionsData?.collections.map(c => c.id) || []);
     const isLoading = isLoadingCollections || isLoadingRecommendationCollections || isLoadingPreferences;
+    const watchedItemsCount = watchedItemsData?.items.length ?? 0;
+    const notInterestedItemsCount = notInterestedItemsData?.items.length ?? 0;
 
     return (
         <>
@@ -400,6 +423,42 @@ const Profile = () => {
                         )}
 
 
+                    </CardContent>
+                </Card>
+
+                <Card className="mt-6">
+                    <CardHeader>
+                        <CardTitle>Marked Items</CardTitle>
+                        <CardDescription>
+                            Review everything you have marked as watched or not interested.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <Button asChild variant="outline" className="w-full h-11 justify-between">
+                            <Link to="/watched">
+                                <span className="inline-flex items-center gap-2">
+                                    <Eye className="h-4 w-4" />
+                                    Watched Items
+                                </span>
+                                <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                    {isLoadingWatchedItems ? '...' : watchedItemsCount}
+                                    <ArrowRight className="h-4 w-4" />
+                                </span>
+                            </Link>
+                        </Button>
+
+                        <Button asChild variant="outline" className="w-full h-11 justify-between">
+                            <Link to="/not-interested">
+                                <span className="inline-flex items-center gap-2">
+                                    <ThumbsDown className="h-4 w-4" />
+                                    Not Interested Items
+                                </span>
+                                <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                    {isLoadingNotInterestedItems ? '...' : notInterestedItemsCount}
+                                    <ArrowRight className="h-4 w-4" />
+                                </span>
+                            </Link>
+                        </Button>
                     </CardContent>
                 </Card>
             </main>

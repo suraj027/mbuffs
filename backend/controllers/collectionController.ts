@@ -486,6 +486,21 @@ export const removeCollaborator = async (req: Request, res: Response, next: Next
 // ============================================================================
 
 const WATCHED_COLLECTION_NAME = '__watched__';
+const NOT_INTERESTED_COLLECTION_NAME = '__not_interested__';
+
+const getSystemCollectionItemsByName = async (userId: string, collectionName: string) => {
+    const result = await sql`
+        SELECT cm.movie_id, cm.added_at
+        FROM collection_movies cm
+        JOIN collections c ON cm.collection_id = c.id
+        WHERE c.owner_id = ${userId}
+          AND c.is_system = true
+          AND c.name = ${collectionName}
+        ORDER BY cm.added_at DESC
+    `;
+
+    return result as { movie_id: string; added_at: string }[];
+};
 
 /**
  * Get the watched status for a specific media item
@@ -566,6 +581,25 @@ export const getWatchedStatusBatch = async (req: Request, res: Response, next: N
 };
 
 /**
+ * Get all watched media entries for the authenticated user
+ */
+export const getWatchedItems = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+
+    try {
+        const items = await getSystemCollectionItemsByName(userId, WATCHED_COLLECTION_NAME);
+        res.status(200).json({ items });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
  * Toggle watched status for a media item
  * Creates the watched collection if it doesn't exist
  */
@@ -580,7 +614,7 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
     
     try {
         // First, get or create the watched collection
-        let watchedCollection = await sql`
+        const watchedCollection = await sql`
             SELECT id FROM collections 
             WHERE owner_id = ${userId} 
               AND is_system = true 
@@ -624,6 +658,166 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
                 VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
             `;
             res.status(200).json({ isWatched: true, message: 'Added to watched' });
+        }
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ============================================================================
+// NOT INTERESTED COLLECTION (System Collection)
+// ============================================================================
+
+/**
+ * Get the not interested status for a specific media item
+ */
+export const getNotInterestedStatus = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+    const { mediaId } = req.params;
+    
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+    
+    try {
+        const result = await sql`
+            SELECT cm.id, cm.added_at
+            FROM collection_movies cm
+            JOIN collections c ON cm.collection_id = c.id
+            WHERE c.owner_id = ${userId} 
+              AND c.is_system = true 
+              AND c.name = ${NOT_INTERESTED_COLLECTION_NAME}
+              AND cm.movie_id = ${mediaId}
+            LIMIT 1
+        `;
+        
+        res.status(200).json({ 
+            isNotInterested: result.length > 0,
+            notInterestedAt: result.length > 0 ? result[0].added_at : null
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get not interested status for multiple media items (batch)
+ */
+export const getNotInterestedStatusBatch = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+    const { mediaIds } = req.body;
+    
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+    
+    if (!Array.isArray(mediaIds) || mediaIds.length === 0) {
+        res.status(400).json({ message: 'mediaIds must be a non-empty array' });
+        return;
+    }
+    
+    try {
+        const result = await sql`
+            SELECT cm.movie_id, cm.added_at
+            FROM collection_movies cm
+            JOIN collections c ON cm.collection_id = c.id
+            WHERE c.owner_id = ${userId} 
+              AND c.is_system = true 
+              AND c.name = ${NOT_INTERESTED_COLLECTION_NAME}
+              AND cm.movie_id = ANY(${mediaIds}::text[])
+        `;
+        
+        const notInterestedMap: Record<string, { isNotInterested: boolean; notInterestedAt: string | null }> = {};
+        for (const mediaId of mediaIds) {
+            const found = result.find((r) => r.movie_id === String(mediaId));
+            notInterestedMap[mediaId] = {
+                isNotInterested: !!found,
+                notInterestedAt: found ? found.added_at : null
+            };
+        }
+        
+        res.status(200).json({ notInterestedStatus: notInterestedMap });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get all not interested media entries for the authenticated user
+ */
+export const getNotInterestedItems = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+
+    try {
+        const items = await getSystemCollectionItemsByName(userId, NOT_INTERESTED_COLLECTION_NAME);
+        res.status(200).json({ items });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Toggle not interested status for a media item
+ * Creates the not interested collection if it doesn't exist
+ */
+export const toggleNotInterestedStatus = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+    const { mediaId } = req.params;
+    
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+    
+    try {
+        // First, get or create the not interested collection
+        const notInterestedCollection = await sql`
+            SELECT id FROM collections 
+            WHERE owner_id = ${userId} 
+              AND is_system = true 
+              AND name = ${NOT_INTERESTED_COLLECTION_NAME}
+            LIMIT 1
+        `;
+        
+        let collectionId: string;
+        
+        if (notInterestedCollection.length === 0) {
+            const newCollectionId = generateId(21);
+            await sql`
+                INSERT INTO collections (id, name, description, owner_id, is_system)
+                VALUES (${newCollectionId}, ${NOT_INTERESTED_COLLECTION_NAME}, 'System collection for not interested items', ${userId}, true)
+            `;
+            collectionId = newCollectionId;
+        } else {
+            collectionId = notInterestedCollection[0].id as string;
+        }
+        
+        const existing = await sql`
+            SELECT id FROM collection_movies 
+            WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
+            LIMIT 1
+        `;
+        
+        if (existing.length > 0) {
+            await sql`
+                DELETE FROM collection_movies 
+                WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
+            `;
+            res.status(200).json({ isNotInterested: false, message: 'Removed from not interested' });
+        } else {
+            const newEntryId = generateId(21);
+            await sql`
+                INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id)
+                VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
+            `;
+            res.status(200).json({ isNotInterested: true, message: 'Added to not interested' });
         }
     } catch (error) {
         next(error);
