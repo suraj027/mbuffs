@@ -171,7 +171,9 @@ const ForYou = () => {
             </Link>
           </div>
           <p className="text-sm text-muted-foreground">
-            Based on {totalSourceItems} items from {sourceCollections.length} collection{sourceCollections.length !== 1 ? 's' : ''}
+            {totalSourceItems > 0
+              ? `Based on ${totalSourceItems} items from ${sourceCollections.length} collection${sourceCollections.length !== 1 ? 's' : ''}`
+              : 'Add source collections to personalize your recommendations'}
           </p>
         </section>
 

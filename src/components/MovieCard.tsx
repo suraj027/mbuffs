@@ -34,6 +34,14 @@ export function MovieCard({
   const mediaType = movie.first_air_date ? "tv" : "movie";
   const navLink = `/media/${mediaType}/${movie.id}`;
   const mediaId = mediaType === "tv" ? `${movie.id}tv` : String(movie.id);
+  const becauseYouLiked = movie.explainability?.because_you_liked?.[0];
+  const meetsExplainabilityCondition = Boolean(becauseYouLiked) && (
+    (movie.explainability?.source_appearances ?? 0) >= 2 ||
+    movie.explainability?.reason_codes?.includes('director_affinity') ||
+    movie.explainability?.reason_codes?.includes('actor_affinity')
+  );
+  const randomBucket = ((movie.id * 7) + (movie.name || movie.title || '').length) % 10;
+  const shouldShowBecauseYouLiked = meetsExplainabilityCondition && randomBucket === 0;
   
   const { isLoggedIn } = useAuth();
   const queryClient = useQueryClient();
@@ -214,6 +222,11 @@ export function MovieCard({
                 </span>
               </div>
             </div>
+            {shouldShowBecauseYouLiked && (
+              <p className="mt-1 text-[10px] text-white/80 line-clamp-1">
+                Because you liked {becauseYouLiked}
+              </p>
+            )}
           </div>
         </div>
       </div>

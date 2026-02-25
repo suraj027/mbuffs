@@ -11,6 +11,7 @@ interface CollectionMovie {
 
 interface TMDBMovie {
     id: number;
+    media_type?: 'movie' | 'tv' | 'person';
     title?: string;
     name?: string;
     poster_path: string | null;
@@ -22,6 +23,30 @@ interface TMDBMovie {
     overview: string;
     backdrop_path: string | null;
     genre_ids?: number[];
+    explainability?: RecommendationExplainability;
+}
+
+interface RecommendationExplainability {
+    reason_codes: string[];
+    source_appearances: number;
+    matched_genres: number[];
+    because_you_liked?: string[];
+    score_breakdown: {
+        base: number;
+        popularity: number;
+        genre: number;
+        source_boost: number;
+        director_boost: number;
+        actor_boost: number;
+        primary_boost: number;
+        total: number;
+    };
+}
+
+interface RecommendationCandidate {
+    item: TMDBMovie;
+    score: number;
+    sources: number;
 }
 
 interface TMDBRecommendationsResponse {
@@ -33,6 +58,8 @@ interface TMDBRecommendationsResponse {
 
 interface TMDBDetailsResponse {
     id: number;
+    title?: string;
+    name?: string;
     genres: { id: number; name: string }[];
     keywords?: { keywords?: { id: number; name: string }[]; results?: { id: number; name: string }[] };
 }
@@ -60,6 +87,13 @@ interface TMDBCreditsResponse {
 }
 
 interface TMDBDiscoverResponse {
+    page: number;
+    results: TMDBMovie[];
+    total_pages: number;
+    total_results: number;
+}
+
+interface TMDBTrendingResponse {
     page: number;
     results: TMDBMovie[];
     total_pages: number;
@@ -116,9 +150,30 @@ interface RecommendationCacheDebugEntry {
     payload_size: number;
 }
 
-const RECOMMENDATION_CACHE_VERSION = 'v1';
+const RECOMMENDATION_CACHE_VERSION = 'v4';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const recommendationCacheLocks = new Map<string, Promise<void>>();
+
+function addReasonCode(codes: string[], code: string): string[] {
+    if (codes.includes(code)) {
+        return codes;
+    }
+
+    return [...codes, code];
+}
+
+function addBecauseYouLiked(items: string[], value: string): string[] {
+    if (!value || items.includes(value)) {
+        return items;
+    }
+
+    return [...items, value].slice(0, 2);
+}
+
+function formatSourceLabel(label: string, isMovie: boolean): string {
+    const suffix = isMovie ? 'movie' : 'tv show';
+    return `${label} (${suffix})`;
+}
 
 function buildRecommendationCacheKey(
     endpoint: RecommendationCacheEndpoint,
@@ -529,6 +584,118 @@ async function getMoviesFromRecommendationCollections(userId: string): Promise<C
     return result as CollectionMovie[];
 }
 
+async function getUserSystemExcludedMovieIds(userId: string): Promise<Set<string>> {
+    const result = await sql`
+        SELECT DISTINCT cm.movie_id
+        FROM collection_movies cm
+        JOIN collections c ON cm.collection_id = c.id
+        WHERE c.owner_id = ${userId}
+        AND c.is_system = true
+    `;
+
+    return new Set((result as { movie_id: string }[]).map((row) => row.movie_id));
+}
+
+function getTrendingKey(item: TMDBMovie): string | null {
+    if (item.media_type === 'person') {
+        return null;
+    }
+
+    const isTv = item.media_type === 'tv' || (!!item.first_air_date && !item.release_date);
+    return isTv ? `${item.id}tv` : `${item.id}`;
+}
+
+async function generateColdStartRecommendations(
+    userId: string,
+    limit: number,
+    page: number,
+    sourceCollections: { id: string; name: string }[]
+): Promise<RecommendationResult> {
+    const excludedMovieIds = await getUserSystemExcludedMovieIds(userId);
+    const tmdbPagesToFetch = Math.min(Math.max(page + 1, 2), 6);
+
+    const pagePromises = Array.from({ length: tmdbPagesToFetch }, (_, i) => i + 1).map(async (tmdbPage) => {
+        const response = await fetchTMDB<TMDBTrendingResponse>('/trending/all/week', {
+            page: tmdbPage.toString()
+        });
+
+        return {
+            results: response?.results || [],
+            total_pages: response?.total_pages || 0,
+            total_results: response?.total_results || 0
+        };
+    });
+
+    const pageResults = await Promise.all(pagePromises);
+    const allResults = pageResults.flatMap((result) => result.results);
+    const tmdbTotalPages = pageResults[0]?.total_pages || 0;
+    const tmdbTotalResults = pageResults[0]?.total_results || 0;
+
+    const seenIds = new Set<string>();
+    const scoredResults: RecommendationCandidate[] = [];
+
+    for (const item of allResults) {
+        const key = getTrendingKey(item);
+        if (!key) {
+            continue;
+        }
+
+        if (excludedMovieIds.has(key) || seenIds.has(key)) {
+            continue;
+        }
+
+        seenIds.add(key);
+
+        const baseScore = (item.vote_average || 0) * 10;
+        const popularityScore = Math.min((item.popularity || 0) / 10, 30);
+        const voteCountScore = Math.min((item.vote_count || 0) / 200, 20);
+        const totalScore = baseScore + popularityScore + voteCountScore;
+
+        scoredResults.push({
+            item: {
+                ...item,
+                explainability: {
+                    reason_codes: ['cold_start_trending'],
+                    source_appearances: 0,
+                    matched_genres: [],
+                    because_you_liked: [],
+                    score_breakdown: {
+                        base: baseScore,
+                        popularity: popularityScore,
+                        genre: 0,
+                        source_boost: 0,
+                        director_boost: 0,
+                        actor_boost: 0,
+                        primary_boost: 0,
+                        total: totalScore
+                    }
+                }
+            },
+            score: totalScore,
+            sources: 0
+        });
+    }
+
+    scoredResults.sort((a, b) => b.score - a.score);
+
+    const filterRatio = allResults.length > 0 ? scoredResults.length / allResults.length : 1;
+    const estimatedTotalResults = Math.floor(tmdbTotalResults * filterRatio);
+    const totalPages = Math.min(Math.ceil(estimatedTotalResults / limit), tmdbTotalPages);
+
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedResults = scoredResults.slice(startIndex, endIndex).map((result) => result.item);
+
+    return {
+        results: paginatedResults,
+        sourceCollections,
+        totalSourceItems: 0,
+        page,
+        total_pages: totalPages,
+        total_results: estimatedTotalResults
+    };
+}
+
 /**
  * Main recommendation algorithm
  * 
@@ -573,13 +740,13 @@ export async function generateRecommendations(
     // Get source collections
     const sourceCollections = await getUserRecommendationCollections(userId);
     if (sourceCollections.length === 0) {
-        return emptyResult;
+        return generateColdStartRecommendations(userId, limit, page, []);
     }
     
     // Get all movies from recommendation source collections
     const sourceMovies = await getMoviesFromRecommendationCollections(userId);
     if (sourceMovies.length === 0) {
-        return { ...emptyResult, sourceCollections };
+        return generateColdStartRecommendations(userId, limit, page, sourceCollections);
     }
     
     // Get movies to exclude: only from source collections and system collections
@@ -603,7 +770,7 @@ export async function generateRecommendations(
     const genreScores: Map<number, number> = new Map();
     const directorScores: Map<number, DirectorInfo> = new Map();
     const actorScores: Map<number, ActorInfo> = new Map();
-    const allRecommendations: Map<string, { item: TMDBMovie; score: number; sources: number; isDirectorBased?: boolean; isActorBased?: boolean }> = new Map();
+    const allRecommendations: Map<string, RecommendationCandidate> = new Map();
     
     // Sample a subset of source movies to avoid rate limiting (max 10 for API calls)
     const sampleSize = Math.min(sourceMovies.length, 10);
@@ -660,13 +827,16 @@ export async function generateRecommendations(
             }
         });
         
-        return { isMovie, recommendations, similar };
+        const rawSourceLabel = details?.title || details?.name || `${id}`;
+        const sourceLabel = formatSourceLabel(rawSourceLabel, isMovie);
+
+        return { isMovie, recommendations, similar, sourceLabel };
     });
     
     const results = await Promise.all(fetchPromises);
     
     // Process all recommendations from TMDB recommendations/similar
-    results.forEach(({ isMovie, recommendations, similar }) => {
+    results.forEach(({ isMovie, recommendations, similar, sourceLabel }) => {
         const allItems = [...recommendations, ...similar];
         
         allItems.forEach(item => {
@@ -684,19 +854,57 @@ export async function generateRecommendations(
                 });
             }
             
+            const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
+
             // Calculate combined score
             const baseScore = (item.vote_average || 0) * 10;
             const popularityScore = Math.min((item.popularity || 0) / 10, 50);
-            const combinedScore = baseScore + popularityScore + genreMatchScore * 5;
+            const genreBoost = genreMatchScore * 5;
+            const combinedScore = baseScore + popularityScore + genreBoost;
             
             const existing = allRecommendations.get(key);
             if (existing) {
                 // Item appeared from multiple sources - boost its score
                 existing.sources += 1;
-                existing.score = combinedScore + (existing.sources * 20);
+                const sourceBoost = existing.sources * 20;
+                existing.score = combinedScore + sourceBoost;
+                const explainability = existing.item.explainability;
+                if (explainability) {
+                    explainability.source_appearances = existing.sources;
+                    explainability.matched_genres = matchedGenres;
+                    explainability.because_you_liked = addBecauseYouLiked(
+                        explainability.because_you_liked || [],
+                        sourceLabel
+                    );
+                    explainability.score_breakdown.base = baseScore;
+                    explainability.score_breakdown.popularity = popularityScore;
+                    explainability.score_breakdown.genre = genreBoost;
+                    explainability.score_breakdown.source_boost = sourceBoost;
+                    explainability.score_breakdown.total = existing.score;
+                }
             } else {
                 allRecommendations.set(key, {
-                    item,
+                    item: {
+                        ...item,
+                        explainability: {
+                            reason_codes: matchedGenres.length > 0
+                                ? ['tmdb_recommendation_or_similar', 'genre_match']
+                                : ['tmdb_recommendation_or_similar'],
+                            source_appearances: 1,
+                            matched_genres: matchedGenres,
+                            because_you_liked: [sourceLabel],
+                            score_breakdown: {
+                                base: baseScore,
+                                popularity: popularityScore,
+                                genre: genreBoost,
+                                source_boost: 0,
+                                director_boost: 0,
+                                actor_boost: 0,
+                                primary_boost: 0,
+                                total: combinedScore
+                            }
+                        }
+                    },
                     score: combinedScore,
                     sources: 1
                 });
@@ -756,19 +964,49 @@ export async function generateRecommendations(
             const baseScore = (item.vote_average || 0) * 10;
             const popularityScore = Math.min((item.popularity || 0) / 10, 20);
             const combinedScore = baseScore + popularityScore + genreWeight + directorBoost;
+            const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
             
             const existing = allRecommendations.get(key);
             if (existing) {
                 // If already recommended via similar/recommendations, give small boost
                 existing.sources += 1;
                 existing.score = Math.max(existing.score, combinedScore) + 10;
-                existing.isDirectorBased = true;
+                const explainability = existing.item.explainability;
+                if (explainability) {
+                    explainability.reason_codes = addReasonCode(explainability.reason_codes, 'director_affinity');
+                    explainability.source_appearances = existing.sources;
+                    explainability.matched_genres = matchedGenres;
+                    explainability.score_breakdown.base = baseScore;
+                    explainability.score_breakdown.popularity = popularityScore;
+                    explainability.score_breakdown.genre = genreWeight;
+                    explainability.score_breakdown.director_boost = Math.max(
+                        explainability.score_breakdown.director_boost,
+                        directorBoost
+                    );
+                    explainability.score_breakdown.total = existing.score;
+                }
             } else {
                 allRecommendations.set(key, {
-                    item,
+                    item: {
+                        ...item,
+                        explainability: {
+                            reason_codes: ['director_affinity', 'genre_match'],
+                            source_appearances: 1,
+                            matched_genres: matchedGenres,
+                            score_breakdown: {
+                                base: baseScore,
+                                popularity: popularityScore,
+                                genre: genreWeight,
+                                source_boost: 0,
+                                director_boost: directorBoost,
+                                actor_boost: 0,
+                                primary_boost: 0,
+                                total: combinedScore
+                            }
+                        }
+                    },
                     score: combinedScore,
-                    sources: 1,
-                    isDirectorBased: true
+                    sources: 1
                 });
             }
         });
@@ -820,19 +1058,49 @@ export async function generateRecommendations(
             const baseScore = (item.vote_average || 0) * 10;
             const popularityScore = Math.min((item.popularity || 0) / 10, 20);
             const combinedScore = baseScore + popularityScore + genreWeight + actorBoost;
+            const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
             
             const existing = allRecommendations.get(key);
             if (existing) {
                 // If already recommended via similar/recommendations, give small boost
                 existing.sources += 1;
                 existing.score = Math.max(existing.score, combinedScore) + 10;
-                existing.isActorBased = true;
+                const explainability = existing.item.explainability;
+                if (explainability) {
+                    explainability.reason_codes = addReasonCode(explainability.reason_codes, 'actor_affinity');
+                    explainability.source_appearances = existing.sources;
+                    explainability.matched_genres = matchedGenres;
+                    explainability.score_breakdown.base = baseScore;
+                    explainability.score_breakdown.popularity = popularityScore;
+                    explainability.score_breakdown.genre = genreWeight;
+                    explainability.score_breakdown.actor_boost = Math.max(
+                        explainability.score_breakdown.actor_boost,
+                        actorBoost
+                    );
+                    explainability.score_breakdown.total = existing.score;
+                }
             } else {
                 allRecommendations.set(key, {
-                    item,
+                    item: {
+                        ...item,
+                        explainability: {
+                            reason_codes: ['actor_affinity', 'genre_match'],
+                            source_appearances: 1,
+                            matched_genres: matchedGenres,
+                            score_breakdown: {
+                                base: baseScore,
+                                popularity: popularityScore,
+                                genre: genreWeight,
+                                source_boost: 0,
+                                director_boost: 0,
+                                actor_boost: actorBoost,
+                                primary_boost: 0,
+                                total: combinedScore
+                            }
+                        }
+                    },
                     score: combinedScore,
-                    sources: 1,
-                    isActorBased: true
+                    sources: 1
                 });
             }
         });
@@ -952,7 +1220,7 @@ export async function generateCategoryRecommendations(
 
     // Build genre profile and collect all recommendations (same as For You page)
     const genreScores: Map<number, { id: number; name: string; count: number }> = new Map();
-    const allRecommendations: Map<string, { item: TMDBMovie; score: number; sources: number }> = new Map();
+    const allRecommendations: Map<string, RecommendationCandidate> = new Map();
     const isMovie = mediaType === 'movie';
 
     // Fetch details, recommendations, and similar for each sampled source item
@@ -1005,16 +1273,48 @@ export async function generateCategoryRecommendations(
             // Calculate combined score (same as For You)
             const baseScore = (item.vote_average || 0) * 10;
             const popularityScore = Math.min((item.popularity || 0) / 10, 50);
-            const combinedScore = baseScore + popularityScore + genreMatchScore * 5;
+            const genreBoost = genreMatchScore * 5;
+            const combinedScore = baseScore + popularityScore + genreBoost;
+            const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId)?.count || 0) > 0);
             
             const existing = allRecommendations.get(key);
             if (existing) {
                 // Item appeared from multiple sources - boost its score
                 existing.sources += 1;
-                existing.score = combinedScore + (existing.sources * 20);
+                const sourceBoost = existing.sources * 20;
+                existing.score = combinedScore + sourceBoost;
+                const explainability = existing.item.explainability;
+                if (explainability) {
+                    explainability.source_appearances = existing.sources;
+                    explainability.matched_genres = matchedGenres;
+                    explainability.score_breakdown.base = baseScore;
+                    explainability.score_breakdown.popularity = popularityScore;
+                    explainability.score_breakdown.genre = genreBoost;
+                    explainability.score_breakdown.source_boost = sourceBoost;
+                    explainability.score_breakdown.total = existing.score;
+                }
             } else {
                 allRecommendations.set(key, {
-                    item,
+                    item: {
+                        ...item,
+                        explainability: {
+                            reason_codes: matchedGenres.length > 0
+                                ? ['tmdb_recommendation_or_similar', 'genre_match', 'category_match']
+                                : ['tmdb_recommendation_or_similar', 'category_match'],
+                            source_appearances: 1,
+                            matched_genres: matchedGenres,
+                            score_breakdown: {
+                                base: baseScore,
+                                popularity: popularityScore,
+                                genre: genreBoost,
+                                source_boost: 0,
+                                director_boost: 0,
+                                actor_boost: 0,
+                                primary_boost: 0,
+                                total: combinedScore
+                            }
+                        }
+                    },
                     score: combinedScore,
                     sources: 1
                 });
@@ -1211,7 +1511,7 @@ export async function generateGenreRecommendations(
     const isMovie = mediaType === 'movie';
     const mediaEndpoint = isMovie ? 'movie' : 'tv';
     const genreScores: Map<number, number> = new Map();
-    const allRecommendations: Map<string, { item: TMDBMovie; score: number; sources: number; isPrimary: boolean }> = new Map();
+    const allRecommendations: Map<string, RecommendationCandidate> = new Map();
 
     // STEP 1: Fetch recommendations/similar from source items (primary personalized results)
     const fetchPromises = sampledItems.map(async (movie) => {
@@ -1257,18 +1557,49 @@ export async function generateGenreRecommendations(
             const baseScore = (item.vote_average || 0) * 10;
             const popularityScore = Math.min((item.popularity || 0) / 10, 50);
             const primaryBoost = 100; // Boost for being from recommendations/similar
-            const combinedScore = baseScore + popularityScore + genreMatchScore * 5 + primaryBoost;
+            const genreBoost = genreMatchScore * 5;
+            const combinedScore = baseScore + popularityScore + genreBoost + primaryBoost;
+            const matchedGenres = (item.genre_ids || []).filter((gId) => (genreScores.get(gId) || 0) > 0);
             
             const existing = allRecommendations.get(key);
             if (existing) {
                 existing.sources += 1;
-                existing.score = combinedScore + (existing.sources * 20);
+                const sourceBoost = existing.sources * 20;
+                existing.score = combinedScore + sourceBoost;
+                const explainability = existing.item.explainability;
+                if (explainability) {
+                    explainability.reason_codes = addReasonCode(explainability.reason_codes, 'genre_match');
+                    explainability.source_appearances = existing.sources;
+                    explainability.matched_genres = matchedGenres;
+                    explainability.score_breakdown.base = baseScore;
+                    explainability.score_breakdown.popularity = popularityScore;
+                    explainability.score_breakdown.genre = genreBoost;
+                    explainability.score_breakdown.source_boost = sourceBoost;
+                    explainability.score_breakdown.primary_boost = primaryBoost;
+                    explainability.score_breakdown.total = existing.score;
+                }
             } else {
                 allRecommendations.set(key, {
-                    item,
+                    item: {
+                        ...item,
+                        explainability: {
+                            reason_codes: ['genre_specific_request', 'tmdb_recommendation_or_similar', 'genre_match'],
+                            source_appearances: 1,
+                            matched_genres: matchedGenres,
+                            score_breakdown: {
+                                base: baseScore,
+                                popularity: popularityScore,
+                                genre: genreBoost,
+                                source_boost: 0,
+                                director_boost: 0,
+                                actor_boost: 0,
+                                primary_boost: primaryBoost,
+                                total: combinedScore
+                            }
+                        }
+                    },
                     score: combinedScore,
-                    sources: 1,
-                    isPrimary: true
+                    sources: 1
                 });
             }
         });
@@ -1323,13 +1654,31 @@ export async function generateGenreRecommendations(
         // Secondary results don't get the primary boost
         const baseScore = (item.vote_average || 0) * 10;
         const popularityScore = Math.min((item.popularity || 0) / 10, 50);
-        const combinedScore = baseScore + popularityScore + genreMatchScore * 5;
+        const genreBoost = genreMatchScore * 5;
+        const combinedScore = baseScore + popularityScore + genreBoost;
+        const matchedGenres = (item.genre_ids || []).filter((gId) => (genreScores.get(gId) || 0) > 0);
 
         allRecommendations.set(key, {
-            item,
+            item: {
+                ...item,
+                explainability: {
+                    reason_codes: ['genre_specific_request', 'discover_supplement'],
+                    source_appearances: 0,
+                    matched_genres: matchedGenres,
+                    score_breakdown: {
+                        base: baseScore,
+                        popularity: popularityScore,
+                        genre: genreBoost,
+                        source_boost: 0,
+                        director_boost: 0,
+                        actor_boost: 0,
+                        primary_boost: 0,
+                        total: combinedScore
+                    }
+                }
+            },
             score: combinedScore,
-            sources: 0,
-            isPrimary: false
+            sources: 0
         });
     }
 
@@ -1526,7 +1875,7 @@ export async function generatePersonalizedTheatricalReleases(
     const tmdbTotalResults = pageResults[0]?.total_results || 0;
 
     // For each now playing movie, score and optionally fetch credits for director/actor matching
-    const scoredResults: { item: TMDBMovie; score: number }[] = [];
+    const scoredResults: RecommendationCandidate[] = [];
     const seenIds = new Set<number>();
 
     // Score results - batch credit fetches for efficiency
@@ -1541,13 +1890,20 @@ export async function generatePersonalizedTheatricalReleases(
         if (existingMovieIds.has(key)) return null;
 
         // Base score
-        let score = (item.vote_average || 0) * 10;
-        score += Math.min((item.popularity || 0) / 10, 30);
+        const baseScore = (item.vote_average || 0) * 10;
+        const popularityScore = Math.min((item.popularity || 0) / 10, 30);
+        let score = baseScore + popularityScore;
+        let genreBoost = 0;
+        let directorBoost = 0;
+        let actorBoost = 0;
+        const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
 
         // Genre match boost
         if (item.genre_ids) {
             item.genre_ids.forEach(genreId => {
-                score += (genreScores.get(genreId) || 0) * 5;
+                const boost = (genreScores.get(genreId) || 0) * 5;
+                genreBoost += boost;
+                score += boost;
             });
         }
 
@@ -1560,7 +1916,9 @@ export async function generatePersonalizedTheatricalReleases(
             directors.forEach(director => {
                 if (topDirectorIds.has(director.id)) {
                     const dirInfo = directorScores.get(director.id);
-                    score += (dirInfo?.count || 1) * 10;
+                    const boost = (dirInfo?.count || 1) * 10;
+                    directorBoost += boost;
+                    score += boost;
                 }
             });
 
@@ -1569,12 +1927,46 @@ export async function generatePersonalizedTheatricalReleases(
             cast.forEach(actor => {
                 if (topActorIds.has(actor.id)) {
                     const actorInfo = actorScores.get(actor.id);
-                    score += (actorInfo?.count || 1) * 5;
+                    const boost = (actorInfo?.count || 1) * 5;
+                    actorBoost += boost;
+                    score += boost;
                 }
             });
         }
 
-        return { item, score };
+        const reasonCodes = ['theatrical_now_playing'];
+        if (matchedGenres.length > 0) {
+            reasonCodes.push('genre_match');
+        }
+        if (directorBoost > 0) {
+            reasonCodes.push('director_affinity');
+        }
+        if (actorBoost > 0) {
+            reasonCodes.push('actor_affinity');
+        }
+
+        return {
+            item: {
+                ...item,
+                explainability: {
+                    reason_codes: reasonCodes,
+                    source_appearances: 0,
+                    matched_genres: matchedGenres,
+                    score_breakdown: {
+                        base: baseScore,
+                        popularity: popularityScore,
+                        genre: genreBoost,
+                        source_boost: 0,
+                        director_boost: directorBoost,
+                        actor_boost: actorBoost,
+                        primary_boost: 0,
+                        total: score
+                    }
+                }
+            },
+            score,
+            sources: 0
+        };
     });
 
     const creditResults = await Promise.all(creditPromises);

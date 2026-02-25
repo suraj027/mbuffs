@@ -18,6 +18,22 @@ export interface Movie {
   popularity?: number;
   overview: string;
   backdrop_path: string | null;
+  explainability?: {
+    reason_codes: string[];
+    source_appearances: number;
+    matched_genres: number[];
+    because_you_liked?: string[];
+    score_breakdown: {
+      base: number;
+      popularity: number;
+      genre: number;
+      source_boost: number;
+      director_boost: number;
+      actor_boost: number;
+      primary_boost: number;
+      total: number;
+    };
+  };
 }
 
 export interface Creator {

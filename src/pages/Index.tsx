@@ -149,7 +149,9 @@ const Index = () => {
                     </Link>
                   </div>
                   <p className="text-sm text-muted-foreground -mt-1">
-                    Based on {recommendationsData?.totalSourceItems || 0} items from {recommendationsData?.sourceCollections?.length || 0} collection{(recommendationsData?.sourceCollections?.length || 0) !== 1 ? 's' : ''}
+                    {(recommendationsData?.totalSourceItems || 0) > 0
+                      ? `Based on ${recommendationsData?.totalSourceItems || 0} items from ${recommendationsData?.sourceCollections?.length || 0} collection${(recommendationsData?.sourceCollections?.length || 0) !== 1 ? 's' : ''}`
+                      : 'Add source collections to personalize your recommendations'}
                   </p>
                   <div className="relative -mx-4">
                     <div 
