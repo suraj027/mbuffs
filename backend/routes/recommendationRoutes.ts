@@ -5,6 +5,7 @@ import {
     getGenreRecommendations,
     getTheatricalRecommendations,
     getRecommendationCollections,
+    getRecommendationCacheDebugHandler,
     addRecommendationCollectionHandler,
     removeRecommendationCollectionHandler,
     setRecommendationCollectionsHandler
@@ -27,6 +28,9 @@ router.get('/genre/:genreId', requireAuth as RequestHandler, getGenreRecommendat
 
 // GET /api/recommendations/collections - Get user's recommendation source collections
 router.get('/collections', requireAuth as RequestHandler, getRecommendationCollections as RequestHandler);
+
+// GET /api/recommendations/debug/cache - Recommendation cache debug endpoint (restricted)
+router.get('/debug/cache', requireAuth as RequestHandler, getRecommendationCacheDebugHandler as RequestHandler);
 
 // POST /api/recommendations/collections - Add a collection to recommendation sources
 router.post('/collections', requireAuth as RequestHandler, addRecommendationCollectionHandler as RequestHandler);

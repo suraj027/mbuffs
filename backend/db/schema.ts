@@ -210,6 +210,28 @@ export const userRecommendationCollections = pgTable("user_recommendation_collec
 ]);
 
 // ============================================================================
+// RECOMMENDATION CACHE TABLE
+// ============================================================================
+export const recommendationCache = pgTable("recommendation_cache", {
+	id: text().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	cacheKey: text("cache_key").notNull(),
+	payloadJson: text("payload_json").notNull(),
+	cacheVersion: text("cache_version").default('v1').notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("idx_recommendation_cache_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+	unique("recommendation_cache_user_cache_key").on(table.userId, table.cacheKey),
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [user.id],
+		name: "recommendation_cache_user_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// ============================================================================
 // PARENTAL GUIDANCE TABLE (scraped from IMDB)
 // ============================================================================
 export const parentalGuidance = pgTable("parental_guidance", {

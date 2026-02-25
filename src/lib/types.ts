@@ -236,6 +236,26 @@ export interface CategoryRecommendationsResponse {
   totalSourceItems: number;
 }
 
+export interface RecommendationCacheDebugEntry {
+  cache_key: string;
+  cache_version: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  payload_size: number;
+}
+
+export interface RecommendationCacheDebugResponse {
+  cache: {
+    total: number;
+    fresh: number;
+    expired: number;
+    entries: RecommendationCacheDebugEntry[];
+  };
+  ttl_minutes: number;
+  allowed_debug_email: string;
+}
+
 // --- Backend Collection Types ---
 
 // Basic Collection Info (used in lists)

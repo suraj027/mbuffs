@@ -10,12 +10,16 @@ import {
     updateCollaboratorSchema
 } from '../lib/validators.js';
 
-import { 
+import {
     CollectionCollaborator, 
     CollectionMovieEntry, 
     CollectionSummary, 
     CollectionRow
 } from '../lib/types.js'; 
+import {
+    invalidateRecommendationCache,
+    invalidateRecommendationCacheByCollection
+} from '../services/recommendationService.js';
 
 interface CollectionDetailsResponse {
     collection: CollectionSummary;
@@ -240,6 +244,9 @@ export const deleteCollection = async (req: Request, res: Response, next: NextFu
             return;
         }
 
+        await invalidateRecommendationCacheByCollection(collectionId);
+        await invalidateRecommendationCache(userId);
+
         res.status(204).send();
     } catch(error) {
         next(error);
@@ -293,6 +300,10 @@ export const addMovieToCollection = async (req: Request, res: Response, next: Ne
                 VALUES (${newEntryId}, ${collectionId}, ${movieId}, ${userId})
                 RETURNING id, movie_id, added_at
             `;
+
+            await invalidateRecommendationCacheByCollection(collectionId);
+            await invalidateRecommendationCache(userId);
+
             res.status(201).json({ movieEntry: result[0] as {id: string, movie_id: number, added_at: string} });
         } catch (insertError: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
             if (insertError.code === '23505') { 
@@ -359,6 +370,9 @@ export const removeMovieFromCollection = async (req: Request, res: Response, nex
             res.status(404).json({ message: 'Movie not found in this collection' });
             return;
         }
+
+        await invalidateRecommendationCacheByCollection(collectionId);
+        await invalidateRecommendationCache(userId);
 
         res.status(204).send();
     } catch (error) {
@@ -649,6 +663,7 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
                 DELETE FROM collection_movies 
                 WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
             `;
+            await invalidateRecommendationCache(userId);
             res.status(200).json({ isWatched: false, message: 'Removed from watched' });
         } else {
             // Add to watched
@@ -657,6 +672,7 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
                 INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id)
                 VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
             `;
+            await invalidateRecommendationCache(userId);
             res.status(200).json({ isWatched: true, message: 'Added to watched' });
         }
     } catch (error) {
@@ -810,6 +826,7 @@ export const toggleNotInterestedStatus = async (req: Request, res: Response, nex
                 DELETE FROM collection_movies 
                 WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
             `;
+            await invalidateRecommendationCache(userId);
             res.status(200).json({ isNotInterested: false, message: 'Removed from not interested' });
         } else {
             const newEntryId = generateId(21);
@@ -817,6 +834,7 @@ export const toggleNotInterestedStatus = async (req: Request, res: Response, nex
                 INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id)
                 VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
             `;
+            await invalidateRecommendationCache(userId);
             res.status(200).json({ isNotInterested: true, message: 'Added to not interested' });
         }
     } catch (error) {

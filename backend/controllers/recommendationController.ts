@@ -1,15 +1,18 @@
 import { Request, Response, NextFunction } from 'express';
 import { sql } from '../lib/db.js';
 import {
-    generateRecommendations,
-    generateCategoryRecommendations,
-    generateGenreRecommendations,
-    generatePersonalizedTheatricalReleases,
+    generateRecommendationsCached,
+    generateCategoryRecommendationsCached,
+    generateGenreRecommendationsCached,
+    generatePersonalizedTheatricalReleasesCached,
     addRecommendationCollection,
     removeRecommendationCollection,
-    setRecommendationCollections
+    setRecommendationCollections,
+    getRecommendationCacheDebug
 } from '../services/recommendationService.js';
 import '../middleware/authMiddleware.js';
+
+const RECOMMENDATION_DEBUG_EMAIL = 'murtuza.creativity@gmail.com';
 
 /**
  * GET /api/recommendations
@@ -24,7 +27,7 @@ export const getRecommendations = async (req: Request, res: Response, next: Next
     try {
         const limit = parseInt(req.query.limit as string) || 20;
         const page = parseInt(req.query.page as string) || 1;
-        const recommendations = await generateRecommendations(req.userId, limit, page);
+        const recommendations = await generateRecommendationsCached(req.userId, limit, page);
         
         res.status(200).json(recommendations);
     } catch (error) {
@@ -51,7 +54,7 @@ export const getCategoryRecommendations = async (req: Request, res: Response, ne
             return res.status(400).json({ message: "mediaType must be 'movie' or 'tv'" });
         }
 
-        const recommendations = await generateCategoryRecommendations(req.userId, mediaType, limit);
+        const recommendations = await generateCategoryRecommendationsCached(req.userId, mediaType, limit);
         
         res.status(200).json(recommendations);
     } catch (error) {
@@ -84,7 +87,7 @@ export const getGenreRecommendations = async (req: Request, res: Response, next:
             return res.status(400).json({ message: "mediaType must be 'movie' or 'tv'" });
         }
 
-        const recommendations = await generateGenreRecommendations(req.userId, genreId, mediaType, limit, page);
+        const recommendations = await generateGenreRecommendationsCached(req.userId, genreId, mediaType, limit, page);
         
         res.status(200).json(recommendations);
     } catch (error) {
@@ -107,7 +110,7 @@ export const getTheatricalRecommendations = async (req: Request, res: Response, 
         const limit = parseInt(req.query.limit as string) || 20;
         const page = parseInt(req.query.page as string) || 1;
 
-        const recommendations = await generatePersonalizedTheatricalReleases(req.userId, limit, page);
+        const recommendations = await generatePersonalizedTheatricalReleasesCached(req.userId, limit, page);
         
         res.status(200).json(recommendations);
     } catch (error) {
@@ -137,6 +140,42 @@ export const getRecommendationCollections = async (req: Request, res: Response, 
         res.status(200).json({ collections: result });
     } catch (error) {
         console.error("Error fetching recommendation collections:", error);
+        next(error);
+    }
+};
+
+/**
+ * GET /api/recommendations/debug/cache
+ * Debug cache visibility for a single authorized user
+ */
+export const getRecommendationCacheDebugHandler = async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+        const sessionEmail = req.user?.email?.toLowerCase();
+        let email = sessionEmail;
+
+        if (!email) {
+            const userResult = await sql`
+                SELECT email FROM "user" WHERE id = ${req.userId}
+            `;
+            email = (userResult[0]?.email as string | undefined)?.toLowerCase();
+        }
+
+        if (email !== RECOMMENDATION_DEBUG_EMAIL) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const cache = await getRecommendationCacheDebug(req.userId);
+        res.status(200).json({
+            cache,
+            ttl_minutes: 30,
+            allowed_debug_email: RECOMMENDATION_DEBUG_EMAIL
+        });
+    } catch (error) {
+        console.error("Error fetching recommendation cache debug data:", error);
         next(error);
     }
 };

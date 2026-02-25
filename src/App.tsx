@@ -35,6 +35,7 @@ import PersonDetail from './pages/PersonDetail';
 import ForYou from './pages/ForYou';
 import WatchedItems from './pages/WatchedItems';
 import NotInterestedItems from './pages/NotInterestedItems';
+import RecommendationCacheDebug from './pages/RecommendationCacheDebug';
 
 // AuthProvider wrapper to initialize auth and handle token from URL
 const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -106,6 +107,14 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <NotInterestedItems />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recommendations/debug-cache"
+            element={
+              <ProtectedRoute>
+                <RecommendationCacheDebug />
               </ProtectedRoute>
             }
           />

@@ -1,4 +1,5 @@
 import { sql } from '../lib/db.js';
+import { createHash } from 'node:crypto';
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
@@ -102,6 +103,220 @@ interface CategoryRecommendationsResult {
     mediaType: 'movie' | 'tv';
     sourceCollections: { id: string; name: string }[];
     totalSourceItems: number;
+}
+
+type RecommendationCacheEndpoint = 'for_you' | 'categories' | 'genre' | 'theatrical';
+
+interface RecommendationCacheDebugEntry {
+    cache_key: string;
+    cache_version: string;
+    expires_at: string;
+    created_at: string;
+    updated_at: string;
+    payload_size: number;
+}
+
+const RECOMMENDATION_CACHE_VERSION = 'v1';
+const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
+const recommendationCacheLocks = new Map<string, Promise<void>>();
+
+function buildRecommendationCacheKey(
+    endpoint: RecommendationCacheEndpoint,
+    params: Record<string, string | number>
+): string {
+    const serialized = JSON.stringify({ endpoint, params, version: RECOMMENDATION_CACHE_VERSION });
+    return createHash('sha256').update(serialized).digest('hex');
+}
+
+async function parseCachePayload<T>(payload: unknown): Promise<T | null> {
+    if (typeof payload === 'string') {
+        try {
+            return JSON.parse(payload) as T;
+        } catch {
+            return null;
+        }
+    }
+
+    if (payload && typeof payload === 'object') {
+        return payload as T;
+    }
+
+    return null;
+}
+
+async function withRecommendationCacheLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+    while (recommendationCacheLocks.has(lockKey)) {
+        await recommendationCacheLocks.get(lockKey);
+    }
+
+    let releaseLock = () => {};
+    const lockPromise = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+    });
+    recommendationCacheLocks.set(lockKey, lockPromise);
+
+    try {
+        return await fn();
+    } finally {
+        recommendationCacheLocks.delete(lockKey);
+        releaseLock();
+    }
+}
+
+async function getCachedRecommendationResult<T>(
+    userId: string,
+    endpoint: RecommendationCacheEndpoint,
+    params: Record<string, string | number>,
+    generator: () => Promise<T>
+): Promise<T> {
+    const cacheKey = buildRecommendationCacheKey(endpoint, params);
+    const now = new Date();
+
+    const existingRows = await sql`
+        SELECT payload_json, expires_at
+        FROM recommendation_cache
+        WHERE user_id = ${userId} AND cache_key = ${cacheKey}
+        LIMIT 1
+    `;
+
+    const existingRow = existingRows[0] as { payload_json: unknown; expires_at: string } | undefined;
+    const cachedPayload = existingRow ? await parseCachePayload<T>(existingRow.payload_json) : null;
+    const isFresh = existingRow ? new Date(existingRow.expires_at) > now : false;
+
+    if (cachedPayload && isFresh) {
+        return cachedPayload;
+    }
+
+    const lockKey = `${userId}:${cacheKey}`;
+
+    return withRecommendationCacheLock(lockKey, async () => {
+        const recheckRows = await sql`
+            SELECT payload_json, expires_at
+            FROM recommendation_cache
+            WHERE user_id = ${userId} AND cache_key = ${cacheKey}
+            LIMIT 1
+        `;
+
+        const recheckRow = recheckRows[0] as { payload_json: unknown; expires_at: string } | undefined;
+        const recheckPayload = recheckRow ? await parseCachePayload<T>(recheckRow.payload_json) : null;
+        const recheckFresh = recheckRow ? new Date(recheckRow.expires_at) > new Date() : false;
+
+        if (recheckPayload && recheckFresh) {
+            return recheckPayload;
+        }
+
+        try {
+            const freshResult = await generator();
+
+            await sql`
+                INSERT INTO recommendation_cache (
+                    id,
+                    user_id,
+                    cache_key,
+                    payload_json,
+                    cache_version,
+                    expires_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    gen_random_uuid()::text,
+                    ${userId},
+                    ${cacheKey},
+                    ${JSON.stringify(freshResult)},
+                    ${RECOMMENDATION_CACHE_VERSION},
+                    NOW() + (${RECOMMENDATION_CACHE_TTL_MINUTES} * INTERVAL '1 minute'),
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (user_id, cache_key)
+                DO UPDATE SET
+                    payload_json = EXCLUDED.payload_json,
+                    cache_version = EXCLUDED.cache_version,
+                    expires_at = EXCLUDED.expires_at,
+                    updated_at = NOW()
+            `;
+
+            return freshResult;
+        } catch (error) {
+            if (recheckPayload) {
+                return recheckPayload;
+            }
+
+            if (cachedPayload) {
+                return cachedPayload;
+            }
+
+            throw error;
+        }
+    });
+}
+
+export async function invalidateRecommendationCache(userId: string): Promise<void> {
+    await sql`
+        DELETE FROM recommendation_cache
+        WHERE user_id = ${userId}
+    `;
+}
+
+export async function invalidateRecommendationCacheByCollection(collectionId: string): Promise<void> {
+    await sql`
+        DELETE FROM recommendation_cache rc
+        USING user_recommendation_collections urc
+        WHERE rc.user_id = urc.user_id
+        AND urc.collection_id = ${collectionId}
+    `;
+}
+
+export async function getRecommendationCacheDebug(userId: string): Promise<{
+    total: number;
+    fresh: number;
+    expired: number;
+    entries: RecommendationCacheDebugEntry[];
+}> {
+    const entriesResult = await sql`
+        SELECT
+            cache_key,
+            cache_version,
+            expires_at,
+            created_at,
+            updated_at,
+            length(payload_json) AS payload_size
+        FROM recommendation_cache
+        WHERE user_id = ${userId}
+        ORDER BY updated_at DESC
+    `;
+
+    const entries = (entriesResult as Array<{
+        cache_key: string;
+        cache_version: string;
+        expires_at: string;
+        created_at: string;
+        updated_at: string;
+        payload_size: number | string;
+    }>).map((entry) => ({
+        ...entry,
+        payload_size: Number(entry.payload_size)
+    }));
+
+    const now = new Date();
+    let fresh = 0;
+    let expired = 0;
+
+    for (const entry of entries) {
+        if (new Date(entry.expires_at) > now) {
+            fresh += 1;
+        } else {
+            expired += 1;
+        }
+    }
+
+    return {
+        total: entries.length,
+        fresh,
+        expired,
+        entries
+    };
 }
 
 /**
@@ -870,6 +1085,8 @@ export async function addRecommendationCollection(
             VALUES (gen_random_uuid()::text, ${userId}, ${collectionId}, NOW())
             ON CONFLICT (user_id, collection_id) DO NOTHING
         `;
+
+        await invalidateRecommendationCache(userId);
         
         return true;
     } catch (error) {
@@ -890,6 +1107,9 @@ export async function removeRecommendationCollection(
             DELETE FROM user_recommendation_collections
             WHERE user_id = ${userId} AND collection_id = ${collectionId}
         `;
+
+        await invalidateRecommendationCache(userId);
+
         return true;
     } catch (error) {
         console.error("Error removing recommendation collection:", error);
@@ -1426,10 +1646,80 @@ export async function setRecommendationCollections(
                 VALUES (gen_random_uuid()::text, ${userId}, ${collectionId}, NOW())
             `;
         }
+
+        await invalidateRecommendationCache(userId);
         
         return true;
     } catch (error) {
         console.error("Error setting recommendation collections:", error);
         return false;
     }
+}
+
+export async function generateRecommendationsCached(
+    userId: string,
+    limit: number = 20,
+    page: number = 1
+): Promise<RecommendationResult> {
+    return getCachedRecommendationResult(
+        userId,
+        'for_you',
+        { limit, page },
+        () => generateRecommendations(userId, limit, page)
+    );
+}
+
+export async function generateCategoryRecommendationsCached(
+    userId: string,
+    mediaType: 'movie' | 'tv' = 'movie',
+    limit: number = 10
+): Promise<CategoryRecommendationsResult> {
+    return getCachedRecommendationResult(
+        userId,
+        'categories',
+        { mediaType, limit },
+        () => generateCategoryRecommendations(userId, mediaType, limit)
+    );
+}
+
+export async function generateGenreRecommendationsCached(
+    userId: string,
+    genreId: number,
+    mediaType: 'movie' | 'tv' = 'movie',
+    limit: number = 20,
+    page: number = 1
+): Promise<{
+    results: TMDBMovie[];
+    page: number;
+    total_pages: number;
+    total_results: number;
+    sourceCollections: { id: string; name: string }[];
+    totalSourceItems: number;
+}> {
+    return getCachedRecommendationResult(
+        userId,
+        'genre',
+        { genreId, mediaType, limit, page },
+        () => generateGenreRecommendations(userId, genreId, mediaType, limit, page)
+    );
+}
+
+export async function generatePersonalizedTheatricalReleasesCached(
+    userId: string,
+    limit: number = 20,
+    page: number = 1
+): Promise<{
+    results: TMDBMovie[];
+    page: number;
+    total_pages: number;
+    total_results: number;
+    sourceCollections: { id: string; name: string }[];
+    totalSourceItems: number;
+}> {
+    return getCachedRecommendationResult(
+        userId,
+        'theatrical',
+        { limit, page },
+        () => generatePersonalizedTheatricalReleases(userId, limit, page)
+    );
 }

@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight } from 'lucide-react';
+import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
 
@@ -227,6 +227,7 @@ const Profile = () => {
     const isLoading = isLoadingCollections || isLoadingRecommendationCollections || isLoadingPreferences;
     const watchedItemsCount = watchedItemsData?.items.length ?? 0;
     const notInterestedItemsCount = notInterestedItemsData?.items.length ?? 0;
+    const canAccessRecommendationCacheDebug = user.email?.toLowerCase() === 'murtuza.creativity@gmail.com';
 
     return (
         <>
@@ -418,6 +419,21 @@ const Profile = () => {
                                     <p className="text-xs text-muted-foreground">
                                         Select at least one source collection to enable personalized categories
                                     </p>
+                                )}
+
+                                {canAccessRecommendationCacheDebug && (
+                                    <>
+                                        <Separator />
+                                        <Button asChild variant="outline" className="w-full h-11 justify-between">
+                                            <Link to="/recommendations/debug-cache">
+                                                <span className="inline-flex items-center gap-2">
+                                                    <Database className="h-4 w-4" />
+                                                    Recommendation Cache Debug
+                                                </span>
+                                                <ArrowRight className="h-4 w-4" />
+                                            </Link>
+                                        </Button>
+                                    </>
                                 )}
                             </>
                         )}

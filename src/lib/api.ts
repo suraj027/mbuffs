@@ -7,7 +7,8 @@ import {
     Genre, GenreListResponse, PersonCreditsResponse, SeasonDetails, TmdbCollectionDetails,
     UserPreferences, UpdateUserPreferencesInput,
     RecommendationsResponse, RecommendationCollectionsResponse, CategoryRecommendationsResponse,
-    CombinedRatingsResponse
+    CombinedRatingsResponse,
+    RecommendationCacheDebugResponse
 } from './types';
 
 const _dayjs = dayjs();
@@ -156,6 +157,10 @@ export const fetchTheatricalRecommendationsApi = async (
     page: number = 1
 ): Promise<RecommendationsResponse> => {
     return fetchBackend(`/recommendations/theatrical?limit=${limit}&page=${page}`);
+};
+
+export const fetchRecommendationCacheDebugApi = async (): Promise<RecommendationCacheDebugResponse> => {
+    return fetchBackend('/recommendations/debug/cache');
 };
 
 // --- Collection API Functions (No changes needed, use fetchBackend) ---
