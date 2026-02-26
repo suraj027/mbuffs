@@ -139,7 +139,7 @@ interface CategoryRecommendationsResult {
     totalSourceItems: number;
 }
 
-type RecommendationCacheEndpoint = 'for_you' | 'categories' | 'genre' | 'theatrical';
+type RecommendationCacheEndpoint = 'for_you' | 'categories' | 'genre' | 'theatrical' | 'exclusions';
 
 interface RecommendationCacheDebugEntry {
     cache_key: string;
@@ -153,6 +153,99 @@ interface RecommendationCacheDebugEntry {
 const RECOMMENDATION_CACHE_VERSION = 'v4';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const recommendationCacheLocks = new Map<string, Promise<void>>();
+
+function selectTopKByScore(candidates: RecommendationCandidate[], k: number): RecommendationCandidate[] {
+    if (k <= 0 || candidates.length === 0) {
+        return [];
+    }
+
+    if (k >= candidates.length) {
+        return [...candidates].sort((a, b) => b.score - a.score);
+    }
+
+    const heap: RecommendationCandidate[] = [];
+
+    const swap = (i: number, j: number): void => {
+        const temp = heap[i];
+        heap[i] = heap[j];
+        heap[j] = temp;
+    };
+
+    const bubbleUp = (index: number): void => {
+        let current = index;
+
+        while (current > 0) {
+            const parent = Math.floor((current - 1) / 2);
+            if (heap[parent].score <= heap[current].score) {
+                break;
+            }
+            swap(parent, current);
+            current = parent;
+        }
+    };
+
+    const bubbleDown = (index: number): void => {
+        let current = index;
+
+        while (true) {
+            const left = current * 2 + 1;
+            const right = current * 2 + 2;
+            let smallest = current;
+
+            if (left < heap.length && heap[left].score < heap[smallest].score) {
+                smallest = left;
+            }
+
+            if (right < heap.length && heap[right].score < heap[smallest].score) {
+                smallest = right;
+            }
+
+            if (smallest === current) {
+                break;
+            }
+
+            swap(current, smallest);
+            current = smallest;
+        }
+    };
+
+    for (const candidate of candidates) {
+        if (heap.length < k) {
+            heap.push(candidate);
+            bubbleUp(heap.length - 1);
+            continue;
+        }
+
+        if (candidate.score <= heap[0].score) {
+            continue;
+        }
+
+        heap[0] = candidate;
+        bubbleDown(0);
+    }
+
+    return heap.sort((a, b) => b.score - a.score);
+}
+
+function paginateTopCandidates(
+    candidates: RecommendationCandidate[],
+    page: number,
+    limit: number
+): RecommendationCandidate[] {
+    if (limit <= 0 || page <= 0 || candidates.length === 0) {
+        return [];
+    }
+
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+
+    if (startIndex >= candidates.length) {
+        return [];
+    }
+
+    const topWindow = selectTopKByScore(candidates, Math.min(endIndex, candidates.length));
+    return topWindow.slice(startIndex, startIndex + limit);
+}
 
 function addReasonCode(codes: string[], code: string): string[] {
     if (codes.includes(code)) {
@@ -584,6 +677,42 @@ async function getMoviesFromRecommendationCollections(userId: string): Promise<C
     return result as CollectionMovie[];
 }
 
+function buildCollectionSnapshotToken(collectionIds: string[]): string {
+    const normalized = [...collectionIds].sort();
+    return createHash('sha256').update(normalized.join(',')).digest('hex');
+}
+
+async function getUserExcludedMovieIdsSnapshot(
+    userId: string,
+    sourceCollectionIds: string[]
+): Promise<Set<string>> {
+    const sourceCollectionsToken = buildCollectionSnapshotToken(sourceCollectionIds);
+
+    const snapshot = await getCachedRecommendationResult<{ movieIds: string[] }>(
+        userId,
+        'exclusions',
+        { sourceCollectionsToken },
+        async () => {
+            const result = await sql`
+                SELECT DISTINCT cm.movie_id
+                FROM collection_movies cm
+                JOIN collections c ON cm.collection_id = c.id
+                WHERE c.owner_id = ${userId}
+                AND (
+                    c.id::text = ANY(${sourceCollectionIds}::text[])
+                    OR c.is_system = true
+                )
+            `;
+
+            return {
+                movieIds: (result as { movie_id: string }[]).map((row) => row.movie_id)
+            };
+        }
+    );
+
+    return new Set(snapshot.movieIds);
+}
+
 async function getUserSystemExcludedMovieIds(userId: string): Promise<Set<string>> {
     const result = await sql`
         SELECT DISTINCT cm.movie_id
@@ -676,15 +805,10 @@ async function generateColdStartRecommendations(
         });
     }
 
-    scoredResults.sort((a, b) => b.score - a.score);
-
     const filterRatio = allResults.length > 0 ? scoredResults.length / allResults.length : 1;
     const estimatedTotalResults = Math.floor(tmdbTotalResults * filterRatio);
     const totalPages = Math.min(Math.ceil(estimatedTotalResults / limit), tmdbTotalPages);
-
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = scoredResults.slice(startIndex, endIndex).map((result) => result.item);
+    const paginatedResults = paginateTopCandidates(scoredResults, page, limit).map((result) => result.item);
 
     return {
         results: paginatedResults,
@@ -749,22 +873,8 @@ export async function generateRecommendations(
         return generateColdStartRecommendations(userId, limit, page, sourceCollections);
     }
     
-    // Get movies to exclude: only from source collections and system collections
-    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
-    const existingMoviesResult = await sql`
-        SELECT DISTINCT cm.movie_id
-        FROM collection_movies cm
-        JOIN collections c ON cm.collection_id = c.id
-        WHERE c.owner_id = ${userId}
-        AND (
-            c.id::text = ANY(${sourceCollectionIds}::text[])
-            OR c.is_system = true
-        )
-    `;
-    const existingMovieIds = new Set(
-        (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
-    );
+    const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
     
     // Build genre, director, and actor preference profiles
     const genreScores: Map<number, number> = new Map();
@@ -1106,19 +1216,10 @@ export async function generateRecommendations(
         });
     });
     
-    // Sort by score
-    const sortedRecommendations = Array.from(allRecommendations.values())
-        .sort((a, b) => b.score - a.score);
-    
-    const totalResults = sortedRecommendations.length;
+    const allCandidates = Array.from(allRecommendations.values());
+    const totalResults = allCandidates.length;
     const totalPages = Math.ceil(totalResults / limit);
-    
-    // Paginate results
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = sortedRecommendations
-        .slice(startIndex, endIndex)
-        .map(r => r.item);
+    const paginatedResults = paginateTopCandidates(allCandidates, page, limit).map(r => r.item);
     
     return {
         results: paginatedResults,
@@ -1185,22 +1286,8 @@ export async function generateCategoryRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections
-    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
-    const existingMoviesResult = await sql`
-        SELECT DISTINCT cm.movie_id
-        FROM collection_movies cm
-        JOIN collections c ON cm.collection_id = c.id
-        WHERE c.owner_id = ${userId}
-        AND (
-            c.id::text = ANY(${sourceCollectionIds}::text[])
-            OR c.is_system = true
-        )
-    `;
-    const existingMovieIds = new Set(
-        (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
-    );
+    const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
 
     // Filter by media type FIRST, then sample
     const sourceItemsOfType = sourceMovies.filter(movie => {
@@ -1475,22 +1562,8 @@ export async function generateGenreRecommendations(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections
-    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
-    const existingMoviesResult = await sql`
-        SELECT DISTINCT cm.movie_id
-        FROM collection_movies cm
-        JOIN collections c ON cm.collection_id = c.id
-        WHERE c.owner_id = ${userId}
-        AND (
-            c.id::text = ANY(${sourceCollectionIds}::text[])
-            OR c.is_system = true
-        )
-    `;
-    const existingMovieIds = new Set(
-        (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
-    );
+    const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
 
     // Filter by media type FIRST
     const sourceItemsOfType = sourceMovies.filter(movie => {
@@ -1682,20 +1755,12 @@ export async function generateGenreRecommendations(
         });
     }
 
-    // Sort by score (primary results will be at the top due to boost)
-    const sortedRecommendations = Array.from(allRecommendations.values())
-        .sort((a, b) => b.score - a.score);
+    const allCandidates = Array.from(allRecommendations.values());
 
     // Estimate total - use discover total as baseline since it's larger
-    const estimatedTotal = Math.max(sortedRecommendations.length, discoverTotalResults);
+    const estimatedTotal = Math.max(allCandidates.length, discoverTotalResults);
     const totalPages = Math.ceil(estimatedTotal / limit);
-
-    // Paginate results
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = sortedRecommendations
-        .slice(startIndex, endIndex)
-        .map(r => r.item);
+    const paginatedResults = paginateTopCandidates(allCandidates, page, limit).map(r => r.item);
 
     return {
         results: paginatedResults,
@@ -1758,22 +1823,8 @@ export async function generatePersonalizedTheatricalReleases(
         return { ...emptyResult, sourceCollections };
     }
 
-    // Get movies to exclude: only from source collections and system collections
-    // (for example __watched__ and __not_interested__)
     const sourceCollectionIds = sourceCollections.map(c => c.id);
-    const existingMoviesResult = await sql`
-        SELECT DISTINCT cm.movie_id
-        FROM collection_movies cm
-        JOIN collections c ON cm.collection_id = c.id
-        WHERE c.owner_id = ${userId}
-        AND (
-            c.id::text = ANY(${sourceCollectionIds}::text[])
-            OR c.is_system = true
-        )
-    `;
-    const existingMovieIds = new Set(
-        (existingMoviesResult as { movie_id: string }[]).map(m => m.movie_id)
-    );
+    const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
 
     // Build genre preference profile from source items (movies only for theatrical)
     const genreScores: Map<number, number> = new Map();
@@ -1977,20 +2028,11 @@ export async function generatePersonalizedTheatricalReleases(
         }
     }
 
-    // Sort by score
-    scoredResults.sort((a, b) => b.score - a.score);
-
     // Estimate total results based on TMDB total and our filtering ratio
     const filterRatio = allResults.length > 0 ? scoredResults.length / allResults.length : 1;
     const estimatedTotalResults = Math.floor(tmdbTotalResults * filterRatio);
     const totalPages = Math.min(Math.ceil(estimatedTotalResults / limit), tmdbTotalPages);
-
-    // Paginate results
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedResults = scoredResults
-        .slice(startIndex, endIndex)
-        .map(r => r.item);
+    const paginatedResults = paginateTopCandidates(scoredResults, page, limit).map(r => r.item);
 
     return {
         results: paginatedResults,
