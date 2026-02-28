@@ -25,7 +25,7 @@ export function MovieGrid({ movies, title, showNotInterested = false }: MovieGri
 
   if (movies.length === 0) {
     return (
-      <div className="text-center py-16 rounded-2xl bg-white/2 border border-white/6">
+      <div className="text-center py-16 rounded-2xl bg-muted/30 border border-border">
         <h2 className="text-xl font-semibold mb-2">
           {title ? title : "No movies found"}
         </h2>

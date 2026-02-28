@@ -116,7 +116,7 @@ const ForYou = () => {
             </Link>
           </section>
 
-          <div className="rounded-2xl bg-gradient-to-br from-primary/5 via-purple-500/5 to-transparent border border-primary/10 p-8 md:p-12 text-center">
+          <div className="rounded-2xl bg-gradient-to-br from-primary/5 via-muted/40 to-transparent border border-primary/10 p-8 md:p-12 text-center">
             <div className="p-4 rounded-xl bg-primary/10 w-fit mx-auto mb-4">
               <Sparkles className="h-8 w-8 text-primary" />
             </div>

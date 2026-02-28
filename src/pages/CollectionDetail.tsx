@@ -340,7 +340,7 @@ const CollectionDetail = () => {
                                     <span>{totalCollaborators} {totalCollaborators === 1 ? 'member' : 'members'}</span>
                                 </button>
                             </DialogTrigger>
-                            <DialogContent className="w-[90%] sm:max-w-[400px] rounded-xl">
+                            <DialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
                                 <DialogHeader>
                                     <DialogTitle>Members</DialogTitle>
                                     <DialogDescription>People who can access this collection.</DialogDescription>
@@ -385,7 +385,10 @@ const CollectionDetail = () => {
                                                                     }}
                                                                     disabled={updateCollaboratorMutation.isPending && updateCollaboratorMutation.variables?.userId === c.user_id}
                                                                 >
-                                                                    <SelectTrigger size="sm" className="!h-5 w-fit text-xs border-0 bg-transparent px-0 py-0 gap-1 text-muted-foreground hover:text-foreground shadow-none focus:ring-0 focus-visible:ring-0 justify-start">
+                                                                    <SelectTrigger
+                                                                        size="sm"
+                                                                        className="h-5 w-fit border-0 bg-transparent px-0 py-0 gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-transparent data-[state=open]:bg-transparent shadow-none focus:ring-0 focus-visible:ring-0 justify-start"
+                                                                    >
                                                                         <SelectValue />
                                                                     </SelectTrigger>
                                                                     <SelectContent>
@@ -409,7 +412,7 @@ const CollectionDetail = () => {
                                                                         Leave
                                                                     </Button>
                                                                 </AlertDialogTrigger>
-                                                                <AlertDialogContent className="w-[90%] sm:max-w-[400px] rounded-xl">
+                                                                <AlertDialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
                                                                     <AlertDialogHeader>
                                                                         <AlertDialogTitle>Leave collection?</AlertDialogTitle>
                                                                         <AlertDialogDescription>Are you sure you want to leave this collection? You will no longer have access to it.</AlertDialogDescription>
@@ -434,7 +437,7 @@ const CollectionDetail = () => {
                                                                             : <UserMinus className="h-4 w-4" />}
                                                                     </Button>
                                                                 </AlertDialogTrigger>
-                                                                <AlertDialogContent className="w-[90%] sm:max-w-[400px] rounded-xl">
+                                                                <AlertDialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
                                                                     <AlertDialogHeader>
                                                                         <AlertDialogTitle>Remove member?</AlertDialogTitle>
                                                                         <AlertDialogDescription>Remove {c.username ?? c.email} from this collection?</AlertDialogDescription>
@@ -466,7 +469,7 @@ const CollectionDetail = () => {
                                                     Add
                                                 </Button>
                                             </DialogTrigger>
-                                            <DialogContent className="w-[90%] sm:max-w-[400px] rounded-xl">
+                                            <DialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
                                                 <form onSubmit={handleSubmitCollab(onAddCollaborator)}>
                                                     <DialogHeader>
                                                         <DialogTitle>Add Member</DialogTitle>
@@ -544,7 +547,7 @@ const CollectionDetail = () => {
                     {canEdit && (
                         <Dialog open={isAddMovieOpen} onOpenChange={setIsAddMovieOpen}>
                             <DialogTrigger asChild>
-                                <Button size="sm" className="gap-1.5">
+                                <Button size="sm" className="gap-1.5 px-3.5 has-[>svg]:px-3.5">
                                     <Plus className="h-4 w-4" />
                                     <span className="hidden sm:inline">Add</span>
                                 </Button>
@@ -589,7 +592,7 @@ const CollectionDetail = () => {
                                             isWatched={isItemWatched}
                                             additionalMenuItems={showRemoveOption ? (
                                                 <DropdownMenuItem
-                                                    className="text-destructive focus:text-destructive cursor-pointer"
+                                                    className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-destructive focus:bg-destructive/10 focus:text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
                                                     disabled={removeMovieMutation.isPending && removeMovieMutation.variables?.movieId === movieEntry.movie_id}
                                                     onClick={(e) => {
                                                         e.preventDefault();
@@ -685,7 +688,7 @@ const AddMovieDialog: React.FC<AddMovieDialogProps> = ({ collectionId, existingM
     const movies = searchResultsData?.pages.flatMap(page => page.results) ?? [];
 
     return (
-        <DialogContent className="w-[90%] sm:max-w-[550px] rounded-xl">
+        <DialogContent className="w-[90%] sm:max-w-[550px] rounded-lg">
             <DialogHeader>
                 <DialogTitle>Add to Collection</DialogTitle>
                 <DialogDescription>Search for movies and TV shows.</DialogDescription>
@@ -792,7 +795,7 @@ const AddMovieDialog: React.FC<AddMovieDialogProps> = ({ collectionId, existingM
             
             <DialogFooter>
                 <DialogClose asChild>
-                    <Button variant="outline">Done</Button>
+                    <Button variant="secondary" className="border border-border/70">Done</Button>
                 </DialogClose>
             </DialogFooter>
         </DialogContent>

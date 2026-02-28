@@ -91,7 +91,7 @@ function CategoryItem({ icon, label, severity, iconColor }: CategoryItemProps) {
             <div className="flex items-center gap-3 min-w-0">
                 <div className={cn(
                     'flex items-center justify-center w-8 h-8 rounded-lg shrink-0',
-                    'bg-white/[0.05]'
+                    'bg-muted/50'
                 )}>
                     <span className={iconColor}>{icon}</span>
                 </div>
@@ -115,7 +115,7 @@ export function ParentalGuidance({ data, isLoading, className }: ParentalGuidanc
         return (
             <div className={cn("flex flex-wrap justify-center md:justify-start gap-2", className)}>
                 {[...Array(4)].map((_, i) => (
-                    <div key={i} className="h-9 w-28 bg-white/5 rounded-full animate-pulse" />
+                    <div key={i} className="h-9 w-28 bg-muted/60 rounded-full animate-pulse" />
                 ))}
             </div>
         );
@@ -196,8 +196,8 @@ export function ParentalGuidance({ data, isLoading, className }: ParentalGuidanc
                     <button 
                         className={cn(
                             "flex items-center justify-center w-7 h-7 rounded-full",
-                            "border border-white/20 text-muted-foreground",
-                            "hover:bg-white/5 hover:text-foreground hover:border-white/30",
+                            "border border-border text-muted-foreground",
+                            "hover:bg-accent hover:text-accent-foreground hover:border-border",
                             "transition-colors"
                         )}
                         aria-label="View parental guidance details"
@@ -209,7 +209,7 @@ export function ParentalGuidance({ data, isLoading, className }: ParentalGuidanc
                     <DialogHeader>
                         <DialogTitle>Parental Guide</DialogTitle>
                     </DialogHeader>
-                    <div className="divide-y divide-white/[0.06]">
+                    <div className="divide-y divide-border">
                         {categories.map((cat, index) => (
                             <CategoryItem
                                 key={index}
@@ -221,7 +221,7 @@ export function ParentalGuidance({ data, isLoading, className }: ParentalGuidanc
                         ))}
                     </div>
                     {/* Attribution */}
-                    <div className="mt-2 pt-3 border-t border-white/[0.06] flex items-center justify-between">
+                    <div className="mt-2 pt-3 border-t border-border flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">
                             Content advisory ratings
                         </span>

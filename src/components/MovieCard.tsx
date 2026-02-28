@@ -46,7 +46,7 @@ export function MovieCard({
   const { isLoggedIn } = useAuth();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-white/10 focus:text-foreground data-[highlighted]:bg-white/10 data-[highlighted]:text-foreground";
+  const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
 
   // Local optimistic overlays. We only use them while they differ from server props.
   const [optimisticWatched, setOptimisticWatched] = useState<boolean | null>(null);
@@ -134,7 +134,7 @@ export function MovieCard({
   return (
     <Link to={navLink} className="group block card-glow rounded-xl transition-transform duration-300 group-hover:scale-[1.03]">
       <div 
-        className="relative overflow-hidden rounded-xl bg-card border border-white/6"
+        className="relative overflow-hidden rounded-xl bg-card border border-border/60"
         onClick={onClick}
       >
         {/* Poster Image */}
@@ -157,17 +157,17 @@ export function MovieCard({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`h-7 w-7 rounded-full bg-black/55 border border-white/10 hover:bg-black/75 transition-opacity ${
+                    className={`h-7 w-7 rounded-full bg-background/70 border border-border/70 hover:bg-background/90 transition-opacity ${
                       menuOpen ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
                     }`}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   >
-                    <MoreVertical className="h-4 w-4 text-white" />
+                    <MoreVertical className="h-4 w-4 text-foreground" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="w-44 rounded-xl border-white/15 bg-[#0d1424]/95 p-1.5 shadow-2xl shadow-black/45 backdrop-blur-xl"
+                  className="w-44 rounded-lg border-border bg-popover/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl"
                 >
                   <DropdownMenuItem
                     className={menuItemClass}
@@ -194,9 +194,9 @@ export function MovieCard({
                       }}
                     >
                       {displayedNotInterested ? (
-                        <ThumbsUp className="h-4 w-4 mr-2 text-emerald-300" />
+                        <ThumbsUp className="h-4 w-4 mr-2 text-foreground/90" />
                       ) : (
-                        <ThumbsDown className="h-4 w-4 mr-2 text-amber-300" />
+                        <ThumbsDown className="h-4 w-4 mr-2 text-muted-foreground" />
                       )}
                       <span className="whitespace-nowrap">{displayedNotInterested ? 'Interested?' : 'Not interested?'}</span>
                     </DropdownMenuItem>
@@ -209,21 +209,21 @@ export function MovieCard({
 
           {/* Title Overlay */}
           <div className="absolute bottom-0 left-0 right-0 p-3 flex flex-col justify-end z-10">
-            <h3 className="font-semibold text-xs sm:text-sm leading-tight text-white line-clamp-2 drop-shadow-md shadow-black">
+            <h3 className="font-semibold text-xs sm:text-sm leading-tight text-foreground line-clamp-2 drop-shadow-md shadow-black">
               {movie.name || movie.title}
             </h3>
             <div className="flex items-center gap-1.5 mt-1">
-              <p className="text-[10px] text-white/70 font-medium">{releaseYear}</p>
-              <span className="text-[10px] text-white/40">•</span>
+              <p className="text-[10px] text-foreground/70 font-medium">{releaseYear}</p>
+              <span className="text-[10px] text-foreground/40">•</span>
               <div className="flex items-center gap-1">
                 <Star className="h-3 w-3 text-yellow-400" fill="currentColor" />
-                <span className="text-[10px] font-medium text-white/90">
+                <span className="text-[10px] font-medium text-foreground/90">
                   {movie.vote_average.toFixed(1)}
                 </span>
               </div>
             </div>
             {shouldShowBecauseYouLiked && (
-              <p className="mt-1 text-[10px] text-white/80 line-clamp-1">
+              <p className="mt-1 text-[10px] text-foreground/80 line-clamp-1">
                 Because you liked {becauseYouLiked}
               </p>
             )}

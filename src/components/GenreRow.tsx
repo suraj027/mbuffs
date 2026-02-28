@@ -79,7 +79,7 @@ export function GenreRow({
       {/* Header with title and See All link */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`h-6 w-1 rounded-full ${isPersonalized ? 'bg-gradient-to-b from-primary to-purple-500' : 'bg-primary'}`} />
+          <div className={`h-6 w-1 rounded-full ${isPersonalized ? 'bg-gradient-to-b from-primary to-muted-foreground' : 'bg-primary'}`} />
           <h2 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
             {rowTitle}
             {isPersonalized && (

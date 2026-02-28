@@ -41,7 +41,7 @@ const Categories = () => {
           <div className="relative">
             {/* Subtle gradient orb */}
             <div className="absolute -top-20 -left-20 w-72 h-72 bg-primary/[0.06] rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -top-10 left-40 w-48 h-48 bg-purple-500/[0.04] rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -top-10 left-40 w-48 h-48 bg-muted/30 rounded-full blur-3xl pointer-events-none" />
 
             <div className="relative">
               <div className="flex items-center gap-3 mb-4">
@@ -49,7 +49,7 @@ const Categories = () => {
                   Browse by <span className="text-gradient">Category</span>
                 </h1>
                 {showPersonalized && (
-                  <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 gap-1">
+                  <Badge variant="secondary" className="bg-secondary/90 text-secondary-foreground border-border/70 gap-1">
                     <Sparkles className="h-3 w-3" />
                     Personalized
                   </Badge>
@@ -75,12 +75,12 @@ const Categories = () => {
         {/* Tabs for Movies / TV Shows */}
         <Tabs defaultValue="movie" className="w-full">
           <div className="flex justify-start overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-            <TabsList className="mb-8 bg-white/4 border border-white/8 w-max">
-              <TabsTrigger value="movie" className="data-[state=active]:bg-white/10 gap-2">
+            <TabsList className="mb-8 w-max">
+              <TabsTrigger value="movie" className="gap-2 px-3">
                 <Film className="h-4 w-4" />
                 Movies
               </TabsTrigger>
-              <TabsTrigger value="tv" className="data-[state=active]:bg-white/10 gap-2">
+              <TabsTrigger value="tv" className="gap-2 px-3">
                 <Tv className="h-4 w-4" />
                 TV Shows
               </TabsTrigger>

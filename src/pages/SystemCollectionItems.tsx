@@ -249,7 +249,7 @@ export function SystemCollectionItemsPage({ kind }: SystemCollectionItemsPagePro
             <div ref={loadMoreRef} />
           </>
         ) : (
-          <div className="text-center py-16 rounded-2xl bg-white/2 border border-white/6">
+          <div className="text-center py-16 rounded-2xl bg-muted/20 border border-border">
             <h2 className="text-xl font-semibold mb-2">No items yet</h2>
             <p className="text-muted-foreground text-sm">
               {kind === "watched"

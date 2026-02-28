@@ -12,25 +12,25 @@ const getCertificationColor = (cert: string): string => {
     
     // Movie ratings (MPAA)
     if (['G', 'TV-G', 'TV-Y', 'TV-Y7'].includes(upperCert)) {
-        return 'bg-green-500/20 text-green-400 border-green-500/30';
+        return 'bg-muted text-muted-foreground border-border';
     }
     if (['PG', 'TV-PG'].includes(upperCert)) {
-        return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+        return 'bg-secondary text-secondary-foreground border-border';
     }
     if (['PG-13', 'TV-14'].includes(upperCert)) {
-        return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+        return 'bg-accent text-accent-foreground border-border';
     }
     if (['R', 'TV-MA', 'NC-17', 'X', '18', '18+', 'A'].includes(upperCert)) {
-        return 'bg-red-500/20 text-red-400 border-red-500/30';
+        return 'bg-destructive/20 text-destructive border-destructive/40';
     }
     
     // International ratings
     if (['U', 'PG', '12', '12A', '15'].includes(upperCert)) {
-        return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+        return 'bg-accent text-accent-foreground border-border';
     }
     
     // Default
-    return 'bg-white/10 text-white/80 border-white/20';
+    return 'bg-muted text-muted-foreground border-border';
 };
 
 export function CertificationBadge({ certification, className }: CertificationBadgeProps) {

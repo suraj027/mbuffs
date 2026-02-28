@@ -82,7 +82,7 @@ export const Navbar = () => {
   return (
     <>
       <header 
-        className={`sticky top-0 z-50 flex items-center gap-4 px-8 transition-all duration-300 ${scrolled ? 'glass border-b border-white/6' : 'bg-transparent border-b border-transparent'}`}
+        className={`sticky top-0 z-50 flex items-center gap-4 px-8 transition-all duration-300 ${scrolled ? 'glass border-b border-border/60' : 'bg-transparent border-b border-transparent'}`}
         style={{ 
           height: 'calc(4rem + env(safe-area-inset-top))', 
           paddingTop: 'env(safe-area-inset-top)' 
@@ -98,12 +98,12 @@ export const Navbar = () => {
             <svg width="0" height="0" className="absolute">
               <defs>
                 <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="hsl(196 80% 60%)" />
-                  <stop offset="100%" stopColor="hsl(260 60% 65%)" />
+                  <stop offset="0%" stopColor="var(--foreground)" />
+                  <stop offset="100%" stopColor="var(--muted-foreground)" />
                 </linearGradient>
               </defs>
             </svg>
-            <span className="bg-linear-to-r from-white to-white/80 bg-clip-text text-transparent">mbuffs</span>
+            <span className="bg-linear-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">mbuffs</span>
           </Link>
           <Link
             to="/categories"
@@ -121,20 +121,20 @@ export const Navbar = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="sm:hidden h-9 w-9 rounded-full bg-black/40 backdrop-blur-md border border-white/12 hover:bg-black/50"
+              className="sm:hidden h-9 w-9 rounded-full bg-muted/70 backdrop-blur-md border border-border hover:bg-muted"
               onClick={() => setMobileSearchOpen(true)}
             >
-              <Search className="h-4 w-4 text-white/60" />
+              <Search className="h-4 w-4 text-muted-foreground" />
             </Button>
 
             {/* Desktop search input */}
             <form onSubmit={handleSearch} className="hidden sm:block flex-1 md:flex-initial">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50 pointer-events-none z-10" />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/90 pointer-events-none z-10" />
                 <Input
                   type="text"
                   placeholder="Search movies..."
-                  className="pl-9! pr-4! h-9! sm:w-48 md:w-64 lg:w-80 bg-black/40! backdrop-blur-md! text-white! placeholder-white/50! rounded-xl! border-white/12! ring-offset-0! focus-visible:ring-1! focus-visible:ring-primary/40! focus-visible:bg-black/50! focus-visible:border-primary/30! transition-all"
+                  className="pl-10! pr-4! h-10! sm:w-56 md:w-72 lg:w-96 bg-card/75! backdrop-blur-md! text-foreground! placeholder:text-muted-foreground/90! rounded-lg! border-border/80! shadow-xs! ring-offset-0! focus-visible:ring-2! focus-visible:ring-ring/40! focus-visible:bg-card! focus-visible:border-ring/70! transition-all"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -170,7 +170,7 @@ export const Navbar = () => {
                     <span>My Collections</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} disabled={isLoggingOut} className="cursor-pointer text-red-600 focus:bg-red-100 focus:text-red-700">
+                  <DropdownMenuItem onClick={handleLogout} disabled={isLoggingOut} className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
                   </DropdownMenuItem>
@@ -198,15 +198,15 @@ export const Navbar = () => {
 
       {/* Mobile Search Dialog */}
       <Dialog open={mobileSearchOpen} onOpenChange={(open) => { setMobileSearchOpen(open); if (!open) setMobileSearchTerm(''); }}>
-        <DialogContent className="w-[92%] max-w-md rounded-xl p-0 gap-0 top-[10%] translate-y-0 [&>button:last-child]:hidden">
+        <DialogContent className="w-[92%] max-w-md rounded-lg p-0 gap-0 top-[10%] translate-y-0 [&>button:last-child]:hidden">
           <DialogHeader className="px-4 pt-4 pb-0">
             <DialogTitle className="sr-only">Search</DialogTitle>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50 pointer-events-none z-10" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/90 pointer-events-none z-10" />
               <Input
                 type="text"
                 placeholder="Search movies & shows..."
-                className="pl-9! h-10! rounded-lg! bg-white/6! border-white/10! text-white! placeholder-white/40! ring-offset-0! focus-visible:ring-1! focus-visible:ring-primary/40! focus-visible:border-primary/30!"
+                className="pl-10! h-10! rounded-lg! bg-card/80! border-border/80! text-foreground! placeholder:text-muted-foreground/90! shadow-xs! ring-offset-0! focus-visible:ring-2! focus-visible:ring-ring/40! focus-visible:border-ring/70!"
                 value={mobileSearchTerm}
                 onChange={(e) => setMobileSearchTerm(e.target.value)}
                 autoFocus
@@ -237,7 +237,7 @@ export const Navbar = () => {
               {mobileResults.slice(0, 10).map((movie) => (
                 <button
                   key={movie.id}
-                  className="flex items-center gap-3 w-full p-2 rounded-lg hover:bg-white/6 transition-colors text-left"
+                  className="flex items-center gap-3 w-full p-2 rounded-lg hover:bg-accent transition-colors text-left"
                   onClick={() => handleMobileResultClick(movie)}
                 >
                   <img
@@ -258,7 +258,7 @@ export const Navbar = () => {
                           {movie.vote_average.toFixed(1)}
                         </span>
                       )}
-                      <span className="text-white/30">{movie.first_air_date ? 'TV' : 'Movie'}</span>
+                      <span className="text-muted-foreground">{movie.first_air_date ? 'TV' : 'Movie'}</span>
                     </div>
                   </div>
                 </button>

@@ -71,7 +71,7 @@ const SeasonDetail = () => {
                 <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
                     {/* Sidebar / Poster */}
                     <div className="w-full sm:w-64 lg:w-72 shrink-0 mx-auto lg:mx-0">
-                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-white/8 aspect-2/3">
+                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-border/60 aspect-2/3">
                             {seasonDetails.poster_path ? (
                                 <img
                                     src={getImageUrl(seasonDetails.poster_path, 'w500')}
@@ -105,7 +105,7 @@ const SeasonDetail = () => {
                     {/* Episodes List */}
                     <div className="flex-1 space-y-6">
                         {seasonDetails.overview && (
-                            <div className="bg-muted/30 p-6 rounded-xl border border-white/5">
+                            <div className="bg-muted/30 p-6 rounded-xl border border-border/50">
                                 <h3 className="font-semibold mb-2 text-lg">Season Overview</h3>
                                 <p className="text-muted-foreground leading-relaxed">{seasonDetails.overview}</p>
                             </div>
@@ -132,7 +132,7 @@ const SeasonDetail = () => {
                                                     <ImageOff className="w-8 h-8 text-muted-foreground/30" />
                                                 </div>
                                             )}
-                                            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded text-xs font-medium text-white/90">
+                                            <div className="absolute top-2 left-2 bg-background/80 backdrop-blur-md px-2 py-0.5 rounded text-xs font-medium text-foreground/90">
                                                 Ep {episode.episode_number}
                                             </div>
                                         </div>

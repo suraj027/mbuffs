@@ -99,8 +99,8 @@ export default function PersonDetail() {
             <>
                 <Navbar />
                 <main className="container py-20 text-center">
-                    <div className="rounded-2xl bg-red-500/5 border border-red-500/10 p-8 max-w-lg mx-auto">
-                        <p className="text-red-500 font-medium">Error loading person details</p>
+                    <div className="rounded-2xl bg-destructive/10 border border-destructive/30 p-8 max-w-lg mx-auto">
+                        <p className="text-destructive font-medium">Error loading person details</p>
                     </div>
                 </main>
             </>
@@ -175,7 +175,7 @@ export default function PersonDetail() {
                     {/* Mobile: Horizontal layout with small image */}
                     <div className="flex md:hidden gap-4 items-start">
                         <div className="w-24 shrink-0">
-                            <div className="rounded-lg overflow-hidden shadow-xl shadow-black/50 border border-white/8">
+                            <div className="rounded-lg overflow-hidden shadow-xl shadow-black/50 border border-border/60">
                                 {personDetails.profile_path ? (
                                     <img
                                         src={getImageUrl(personDetails.profile_path, 'w185')}
@@ -222,7 +222,7 @@ export default function PersonDetail() {
 
                     {/* Desktop: Profile Image */}
                     <div className="hidden md:block w-64 shrink-0">
-                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-white/8">
+                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-border/60">
                             {personDetails.profile_path ? (
                                 <img
                                     src={getImageUrl(personDetails.profile_path, 'w500')}
@@ -256,7 +256,7 @@ export default function PersonDetail() {
                             )}
                             {personDetails.deathday && (
                                 <>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-muted-foreground/40">|</span>
                                     <span>
                                         Died {formatDate(personDetails.deathday)}
                                         {age !== null && ` (age ${age})`}
@@ -265,7 +265,7 @@ export default function PersonDetail() {
                             )}
                             {personDetails.place_of_birth && (
                                 <>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-muted-foreground/40">|</span>
                                     <span>{personDetails.place_of_birth}</span>
                                 </>
                             )}
@@ -348,7 +348,7 @@ export default function PersonDetail() {
                                                     to={`/media/${credit.media_type}/${credit.id}`}
                                                     className="shrink-0 w-32 md:w-40 snap-center group"
                                                 >
-                                                    <div className="rounded-lg overflow-hidden border border-white/8 bg-muted/30 mb-2 aspect-2/3 relative">
+                                                    <div className="rounded-lg overflow-hidden border border-border/60 bg-muted/30 mb-2 aspect-2/3 relative">
                                                         {credit.poster_path ? (
                                                             <img
                                                                 src={getImageUrl(credit.poster_path, 'w342')}
@@ -361,7 +361,7 @@ export default function PersonDetail() {
                                                             </div>
                                                         )}
                                                         {credit.vote_average > 0 && (
-                                                            <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
+                                                            <div className="absolute top-2 right-2 flex items-center gap-1 bg-background/85 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
                                                                 <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
                                                                 <span>{credit.vote_average.toFixed(1)}</span>
                                                             </div>
@@ -411,7 +411,7 @@ export default function PersonDetail() {
                                                 to={`/media/${credit.media_type}/${credit.id}`}
                                                 className="group"
                                             >
-                                                <div className="rounded-lg overflow-hidden border border-white/8 bg-muted/30 mb-2 aspect-2/3 relative">
+                                                <div className="rounded-lg overflow-hidden border border-border/60 bg-muted/30 mb-2 aspect-2/3 relative">
                                                     {credit.poster_path ? (
                                                         <img
                                                             src={getImageUrl(credit.poster_path, 'w342')}
@@ -424,7 +424,7 @@ export default function PersonDetail() {
                                                         </div>
                                                     )}
                                                     {credit.vote_average > 0 && (
-                                                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
+                                                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-background/85 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
                                                             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
                                                             <span>{credit.vote_average.toFixed(1)}</span>
                                                         </div>
@@ -474,7 +474,7 @@ export default function PersonDetail() {
                                                     to={`/media/${credit.media_type}/${credit.id}`}
                                                     className="shrink-0 w-32 md:w-40 snap-center group"
                                                 >
-                                                    <div className="rounded-lg overflow-hidden border border-white/8 bg-muted/30 mb-2 aspect-2/3 relative">
+                                                    <div className="rounded-lg overflow-hidden border border-border/60 bg-muted/30 mb-2 aspect-2/3 relative">
                                                         {credit.poster_path ? (
                                                             <img
                                                                 src={getImageUrl(credit.poster_path, 'w342')}
@@ -487,7 +487,7 @@ export default function PersonDetail() {
                                                             </div>
                                                         )}
                                                         {credit.vote_average > 0 && (
-                                                            <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
+                                                            <div className="absolute top-2 right-2 flex items-center gap-1 bg-background/85 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
                                                                 <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
                                                                 <span>{credit.vote_average.toFixed(1)}</span>
                                                             </div>
@@ -535,7 +535,7 @@ export default function PersonDetail() {
                                                 to={`/media/${credit.media_type}/${credit.id}`}
                                                 className="group"
                                             >
-                                                <div className="rounded-lg overflow-hidden border border-white/8 bg-muted/30 mb-2 aspect-2/3 relative">
+                                                <div className="rounded-lg overflow-hidden border border-border/60 bg-muted/30 mb-2 aspect-2/3 relative">
                                                     {credit.poster_path ? (
                                                         <img
                                                             src={getImageUrl(credit.poster_path, 'w342')}
@@ -548,7 +548,7 @@ export default function PersonDetail() {
                                                         </div>
                                                     )}
                                                     {credit.vote_average > 0 && (
-                                                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
+                                                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-background/85 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
                                                             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
                                                             <span>{credit.vote_average.toFixed(1)}</span>
                                                         </div>
@@ -654,7 +654,7 @@ export default function PersonDetail() {
                                             <div key={year} className="relative">
                                                 {/* Year Header */}
                                                 <div className="sticky top-20 z-10 mb-4">
-                                                    <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-secondary/80 backdrop-blur-sm text-sm font-medium text-foreground/90 border border-white/8">
+                                                    <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-secondary/80 backdrop-blur-sm text-sm font-medium text-foreground/90 border border-border/60">
                                                         {year}
                                                     </span>
                                                 </div>
@@ -665,10 +665,10 @@ export default function PersonDetail() {
                                                         <Link
                                                             key={`${credit.id}-${credit.media_type}`}
                                                             to={`/media/${credit.media_type}/${credit.id}`}
-                                                            className="group flex gap-3 p-3 rounded-xl bg-card/50 border border-white/5 hover:bg-card hover:border-white/10 transition-all duration-200"
+                                                            className="group flex gap-3 p-3 rounded-lg bg-card/90 border border-border/70 shadow-sm hover:bg-card hover:border-border hover:shadow-md transition-all duration-200"
                                                         >
                                                             {/* Poster */}
-                                                            <div className="shrink-0 w-12 h-18 rounded-lg overflow-hidden bg-muted/30 border border-white/5">
+                                                            <div className="shrink-0 w-12 h-18 rounded-md overflow-hidden bg-muted/50 border border-border/60">
                                                                 {credit.poster_path ? (
                                                                     <img
                                                                         src={getImageUrl(credit.poster_path, 'w92')}
@@ -688,7 +688,7 @@ export default function PersonDetail() {
                                                                 <h3 className="text-sm font-medium text-foreground line-clamp-1 group-hover:text-primary transition-colors">
                                                                     {credit.title || credit.name}
                                                                 </h3>
-                                                                <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{credit.roles.join(', ')}</p>
+                                                                <p className="text-xs text-foreground/70 line-clamp-2 mt-0.5">{credit.roles.join(', ')}</p>
                                                             </div>
                                                         </Link>
                                                     ))}

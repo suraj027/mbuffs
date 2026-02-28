@@ -90,13 +90,15 @@ const Index = () => {
         <section className="relative mb-12 md:mb-16">
           {/* Subtle gradient orb behind the text */}
           <div className="absolute -top-20 -left-20 w-72 h-72 bg-primary/6 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -top-10 left-40 w-48 h-48 bg-purple-500/4 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -top-10 left-40 w-48 h-48 bg-muted/30 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative">
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-4">
-              A place for your
-              <br />
-              <span className="text-gradient">movie buffs.</span>
+              <span className="text-gradient inline-block">
+                A place for your
+                <br />
+                movie buffs.
+              </span>
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground max-w-md">
               Watch, Add, Share.
@@ -183,7 +185,7 @@ const Index = () => {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-2xl bg-linear-to-br from-primary/5 via-purple-500/5 to-transparent border border-primary/10 p-6 md:p-8">
+                <div className="rounded-2xl bg-linear-to-br from-primary/5 via-muted/40 to-transparent border border-primary/10 p-6 md:p-8">
                   <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
                     <div className="p-3 rounded-xl bg-primary/10">
                       <Sparkles className="h-6 w-6 text-primary" />

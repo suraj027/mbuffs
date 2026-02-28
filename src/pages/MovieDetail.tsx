@@ -21,7 +21,7 @@ const TMDB_LOGO_BASE = 'https://image.tmdb.org/t/p/w92';
 
 function NetworkBadge({ network }: { network: Network }) {
     return (
-        <div className="flex items-center justify-center rounded-md bg-white/6 border border-white/8 px-2 py-1 transition-colors hover:bg-white/10" title={network.name}>
+        <div className="flex items-center justify-center rounded-md bg-secondary/40 border border-border/60 px-2 py-1 transition-colors hover:bg-secondary/70" title={network.name}>
             {network.logo_path ? (
                 <img
                     src={`${TMDB_LOGO_BASE}${network.logo_path}`}
@@ -46,7 +46,7 @@ function ProviderList({ title, providers }: { title: string, providers: WatchPro
                         <img
                             src={`${TMDB_LOGO_BASE}${p.logo_path}`}
                             alt={p.provider_name}
-                            className="w-10 h-10 rounded-md shadow-md border border-white/8 transition-transform group-hover:scale-105"
+                            className="w-10 h-10 rounded-md shadow-md border border-border/60 transition-transform group-hover:scale-105"
                         />
                     </div>
                 ))}
@@ -89,7 +89,7 @@ const CollectionSection = ({ collectionId, currentMediaId }: { collectionId: num
                         to={`/media/movie/${part.id}`}
                         className="shrink-0 w-36 md:w-44 snap-center group/card block"
                     >
-                        <div className="aspect-2/3 rounded-lg overflow-hidden border border-white/8 bg-muted shadow-md mb-2 relative">
+                        <div className="aspect-2/3 rounded-lg overflow-hidden border border-border/60 bg-muted shadow-md mb-2 relative">
                             {part.poster_path ? (
                                 <img
                                     src={getImageUrl(part.poster_path, 'w342')}
@@ -102,7 +102,7 @@ const CollectionSection = ({ collectionId, currentMediaId }: { collectionId: num
                                 </div>
                             )}
                             {String(part.id) === currentMediaId && (
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[1px]">
+                                <div className="absolute inset-0 bg-background/70 flex items-center justify-center backdrop-blur-[1px]">
                                     <span className="bg-primary/90 text-primary-foreground text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
                                         Now Viewing
                                     </span>
@@ -147,7 +147,7 @@ const MovieDetail = () => {
 
     const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
     const showNotInterested = isLoggedIn && recommendationsEnabled;
-    const activeActionClass = 'bg-white/12 border-white/20 text-foreground';
+    const activeActionClass = 'bg-accent border-border text-foreground';
 
     const { data: mediaDetails, isLoading, isError, error } = useQuery<MovieDetails, Error>({
         queryKey: queryKey,
@@ -494,8 +494,8 @@ const MovieDetail = () => {
             <>
                 <Navbar />
                 <main className="container py-20 text-center">
-                    <div className="rounded-2xl bg-red-500/5 border border-red-500/10 p-8 max-w-lg mx-auto">
-                        <p className="text-red-500 font-medium">Error loading details: {error?.message ?? 'Unknown error'}</p>
+                    <div className="rounded-2xl bg-destructive/10 border border-destructive/30 p-8 max-w-lg mx-auto">
+                        <p className="text-destructive font-medium">Error loading details: {error?.message ?? 'Unknown error'}</p>
                     </div>
                 </main>
             </>
@@ -558,7 +558,7 @@ const MovieDetail = () => {
                 <div className="flex flex-col md:flex-row gap-6 md:gap-8">
                     {/* Poster */}
                     <div className="w-48 md:w-56 lg:w-64 shrink-0 mx-auto md:mx-0">
-                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-white/8">
+                        <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-border/60">
                             <img
                                 src={posterPath ? getImageUrl(posterPath, 'w500') : '/placeholder.svg'}
                                 alt={title}
@@ -584,13 +584,13 @@ const MovieDetail = () => {
                             {/* Certification Badge */}
                             {ratingsData?.certification?.certification && (
                                 <>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-muted-foreground/40">|</span>
                                     <CertificationBadge certification={ratingsData.certification.certification} />
                                 </>
                             )}
                             {rating && rating !== '0.0' && (
                                 <>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-muted-foreground/40">|</span>
                                     <span className="flex items-center gap-1.5">
                                         <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
                                         <span className="font-medium text-foreground/80">{rating}</span>
@@ -599,16 +599,16 @@ const MovieDetail = () => {
                             )}
                             {mediaDetails.runtime > 0 && (
                                 <>
-                                    <span className="text-white/20">|</span>
+                                    <span className="text-muted-foreground/40">|</span>
                                     <span>{Math.floor(mediaDetails.runtime / 60)}h {mediaDetails.runtime % 60}m</span>
                                 </>
                             )}
                             {genres.length > 0 && (
                                 <>
-                                    <span className="hidden md:inline text-white/20">|</span>
+                                    <span className="hidden md:inline text-muted-foreground/40">|</span>
                                     <div className="flex flex-wrap justify-center md:justify-start gap-2">
                                         {genres.map(genre => (
-                                            <Badge key={genre.id} variant="outline" className="border-white/10 text-foreground/70 px-2 py-0 h-5 text-xs font-normal">
+                                            <Badge key={genre.id} variant="outline" className="border-border text-foreground/70 px-2 py-0 h-5 text-xs font-normal">
                                                 {genre.name}
                                             </Badge>
                                         ))}
@@ -655,14 +655,14 @@ const MovieDetail = () => {
                                 <PopoverTrigger asChild>
                                     <Button
                                         variant="outline"
-                                        className="w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
+                                        className="w-40 justify-center border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2"
                                     >
                                         <Bookmark className={`h-4 w-4 ${isInAnyCollection ? 'fill-current' : ''}`} />
                                         <span>Save</span>
                                         <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                                     </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-72 p-0 border-border bg-popover shadow-xl shadow-black/50" align="start">
+                                <PopoverContent className="w-72 p-0 border-border bg-popover shadow-xl shadow-black/40" align="start">
                                     <div className="px-4 py-3 border-b border-border">
                                         <p className="text-sm font-semibold text-foreground">
                                             Save to collection
@@ -752,7 +752,7 @@ const MovieDetail = () => {
                                 <>
                                     <Button
                                         variant="outline"
-                                        className={`w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
+                                        className={`w-40 justify-center border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
                                         onClick={() => toggleWatchedMutation.mutate()}
                                         disabled={isLoadingWatched}
                                     >
@@ -766,7 +766,7 @@ const MovieDetail = () => {
                                     {showNotInterested && (
                                         <Button
                                             variant="outline"
-                                            className={`w-40 justify-center border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
+                                            className={`w-40 justify-center border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
                                             onClick={() => toggleNotInterestedMutation.mutate()}
                                             disabled={isLoadingNotInterested}
                                         >
@@ -792,7 +792,7 @@ const MovieDetail = () => {
                         <section className="space-y-4">
                             <div className="flex flex-col md:flex-row md:items-stretch md:gap-8">
                                 {/* Overview Content - 70% on desktop */}
-                                <div className="w-full md:w-[70%] space-y-4">
+                                <div className="w-full md:w-[80%] space-y-4">
                                     <h2 className="text-xl md:text-2xl font-semibold text-foreground/90 text-center md:text-left">Overview</h2>
                                     <div className="flex flex-col items-center md:items-start text-center md:text-left">
                                         <p className="text-base leading-relaxed text-foreground/80">
@@ -812,21 +812,21 @@ const MovieDetail = () => {
                                 </div>
 
                                 {/* Separator and Save/Watched Buttons - Desktop Only - 30% */}
-                                <div className="hidden md:flex md:w-[30%] md:items-start md:gap-6">
-                                    <Separator orientation="vertical" className="h-full bg-white/10" />
-                                    <div className="flex flex-col items-start gap-3 pt-1">
+                                <div className="hidden md:flex md:w-[20%] md:items-start md:gap-6">
+                                    <Separator orientation="vertical" className="h-full bg-border" />
+                                    <div className="flex w-full flex-col gap-3 pt-1">
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button
                                                     variant="outline"
-                                                    className="w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2"
+                                                    className="h-10 w-full justify-start border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2"
                                                 >
                                                     <Bookmark className={`h-4 w-4 ${isInAnyCollection ? 'fill-current' : ''}`} />
                                                     <span>Save</span>
                                                     <MoreHorizontal className="h-4 w-4 ml-auto text-muted-foreground" />
                                                 </Button>
                                             </PopoverTrigger>
-                                            <PopoverContent className="w-72 p-0 border-border bg-popover shadow-xl shadow-black/50" align="end">
+                                            <PopoverContent className="w-72 p-0 border-border bg-popover shadow-xl shadow-black/40" align="end">
                                                 <div className="px-4 py-3 border-b border-border">
                                                     <p className="text-sm font-semibold text-foreground">
                                                         Save to collection
@@ -916,7 +916,7 @@ const MovieDetail = () => {
                                             <>
                                                 <Button
                                                     variant="outline"
-                                                    className={`w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
+                                                    className={`h-10 w-full justify-start border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2 ${isWatched ? activeActionClass : ''}`}
                                                     onClick={() => toggleWatchedMutation.mutate()}
                                                     disabled={isLoadingWatched}
                                                 >
@@ -930,7 +930,7 @@ const MovieDetail = () => {
                                                 {showNotInterested && (
                                                     <Button
                                                         variant="outline"
-                                                        className={`w-40 justify-start border-white/10 bg-white/4 hover:bg-white/8 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
+                                                        className={`h-10 w-full justify-start border-border bg-secondary/40 hover:bg-secondary/70 text-foreground/90 gap-2 ${isNotInterested ? activeActionClass : ''}`}
                                                         onClick={() => toggleNotInterestedMutation.mutate()}
                                                         disabled={isLoadingNotInterested}
                                                     >
@@ -976,7 +976,7 @@ const MovieDetail = () => {
                             <div className="flex overflow-x-auto gap-4 pb-4 snap-x scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
                                 {videos.map((video: Video) => (
                                     <div key={video.key} className="shrink-0 w-80 md:w-96 snap-center group/card">
-                                        <div className="relative aspect-video rounded-xl overflow-hidden border border-white/8 bg-muted shadow-lg shadow-black/20">
+                                        <div className="relative aspect-video rounded-xl overflow-hidden border border-border/60 bg-muted shadow-lg shadow-black/20">
                                             {playingVideoId === video.key ? (
                                                 <iframe
                                                     src={`https://www.youtube.com/embed/${video.key}?autoplay=1&rel=0`}
@@ -998,10 +998,10 @@ const MovieDetail = () => {
                                                             (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${video.key}/sddefault.jpg`;
                                                         }}
                                                     />
-                                                    <div className="absolute inset-0 bg-black/20 transition-colors group-hover/card:bg-black/30" />
+                                                    <div className="absolute inset-0 bg-background/30 transition-colors group-hover/card:bg-background/45" />
                                                     <div className="absolute inset-0 flex items-center justify-center">
-                                                        <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center transition-all duration-300 group-hover/card:scale-110 group-hover/card:bg-white/30">
-                                                            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                                                        <div className="w-12 h-12 rounded-full bg-background/50 backdrop-blur-md border border-border/70 flex items-center justify-center transition-all duration-300 group-hover/card:scale-110 group-hover/card:bg-background/65">
+                                                            <Play className="w-5 h-5 text-foreground fill-foreground ml-0.5" />
                                                         </div>
                                                     </div>
                                                 </button>
@@ -1012,7 +1012,7 @@ const MovieDetail = () => {
                                                 {video.name}
                                             </p>
                                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                <Badge variant="secondary" className="h-5 px-1.5 font-normal bg-white/10 text-white/70 hover:bg-white/20">
+                                                <Badge variant="secondary" className="h-5 px-1.5 font-normal bg-secondary/60 text-secondary-foreground hover:bg-secondary/80">
                                                     {video.type}
                                                 </Badge>
                                                 <span>YouTube</span>
@@ -1037,7 +1037,7 @@ const MovieDetail = () => {
                                         to={`/tv/${mediaId}/season/${season.season_number}`}
                                         className="shrink-0 w-36 md:w-44 snap-center group/card block"
                                     >
-                                        <div className="aspect-2/3 rounded-lg overflow-hidden border border-white/8 bg-muted shadow-md mb-2 relative">
+                                        <div className="aspect-2/3 rounded-lg overflow-hidden border border-border/60 bg-muted shadow-md mb-2 relative">
                                             {season.poster_path ? (
                                                 <img
                                                     src={getImageUrl(season.poster_path, 'w342')}
@@ -1050,7 +1050,7 @@ const MovieDetail = () => {
                                                     <span className="text-sm text-muted-foreground">{season.name}</span>
                                                 </div>
                                             )}
-                                            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded text-[10px] font-medium text-white/90">
+                                            <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm px-1.5 py-0.5 rounded text-[10px] font-medium text-foreground/90">
                                                 {season.episode_count} eps
                                             </div>
                                         </div>
@@ -1086,7 +1086,7 @@ const MovieDetail = () => {
                                 >
                                     {cast.map((member: CastMember) => (
                                         <Link key={member.id} to={`/person/${member.id}`} className="shrink-0 w-24 flex flex-col items-center text-center snap-center group">
-                                            <div className="w-20 h-20 rounded-full overflow-hidden bg-muted/30 border border-white/8 mb-2 transition-transform duration-300 group-hover:scale-105">
+                                            <div className="w-20 h-20 rounded-full overflow-hidden bg-muted/30 border border-border/60 mb-2 transition-transform duration-300 group-hover:scale-105">
                                                 {member.profile_path ? (
                                                     <img
                                                         src={getImageUrl(member.profile_path, 'w185')}
@@ -1116,7 +1116,7 @@ const MovieDetail = () => {
                             <div className="hidden md:grid grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-6">
                                 {cast.map((member: CastMember) => (
                                     <Link key={member.id} to={`/person/${member.id}`} className="flex flex-col items-center text-center group">
-                                        <div className="w-24 h-24 rounded-full overflow-hidden bg-muted/30 border border-white/8 mb-2 transition-transform duration-300 group-hover:scale-105">
+                                        <div className="w-24 h-24 rounded-full overflow-hidden bg-muted/30 border border-border/60 mb-2 transition-transform duration-300 group-hover:scale-105">
                                             {member.profile_path ? (
                                                 <img
                                                     src={getImageUrl(member.profile_path, 'w185')}
@@ -1182,7 +1182,7 @@ const MovieDetail = () => {
                                     >
                                         {uniqueCrew.map((member) => (
                                             <Link key={member.id} to={`/person/${member.id}`} className="shrink-0 w-24 flex flex-col items-center text-center snap-center group">
-                                                <div className="w-20 h-20 rounded-full overflow-hidden bg-muted/30 border border-white/8 mb-2 transition-transform duration-300 group-hover:scale-105">
+                                                <div className="w-20 h-20 rounded-full overflow-hidden bg-muted/30 border border-border/60 mb-2 transition-transform duration-300 group-hover:scale-105">
                                                     {member.profile_path ? (
                                                         <img
                                                             src={getImageUrl(member.profile_path, 'w185')}
@@ -1212,7 +1212,7 @@ const MovieDetail = () => {
                                 <div className="hidden md:grid grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-6">
                                     {uniqueCrew.map((member) => (
                                         <Link key={member.id} to={`/person/${member.id}`} className="flex flex-col items-center text-center group">
-                                            <div className="w-24 h-24 rounded-full overflow-hidden bg-muted/30 border border-white/8 mb-2 transition-transform duration-300 group-hover:scale-105">
+                                            <div className="w-24 h-24 rounded-full overflow-hidden bg-muted/30 border border-border/60 mb-2 transition-transform duration-300 group-hover:scale-105">
                                                 {member.profile_path ? (
                                                     <img
                                                         src={getImageUrl(member.profile_path, 'w185')}
@@ -1290,7 +1290,7 @@ const MovieDetail = () => {
                                                 to={`/media/${work.media_type}/${work.id}`}
                                                 className="shrink-0 w-32 md:w-40 snap-center group/card block"
                                             >
-                                                <div className="aspect-2/3 rounded-lg overflow-hidden border border-white/8 bg-muted shadow-md mb-2">
+                                                <div className="aspect-2/3 rounded-lg overflow-hidden border border-border/60 bg-muted shadow-md mb-2">
                                                     <img
                                                         src={getImageUrl(work.poster_path, 'w342')}
                                                         alt={work.title || work.name}

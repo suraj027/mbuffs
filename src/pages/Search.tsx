@@ -63,7 +63,7 @@ const Search = () => {
             </div>
           </div>
         ) : isError ? (
-           <div className="text-red-500 text-center py-12">
+           <div className="text-destructive text-center py-12">
              <p>Error searching for movies: {error.message}</p>
            </div>
         ) : query && movies.length === 0 && !isLoading ? (
