@@ -11,6 +11,7 @@ export const loginSchema = z.object({ ... });
 export const createCollectionSchema = z.object({
   name: z.string().min(1, "Collection name cannot be empty").max(255),
   description: z.string().max(1000).optional(),
+  is_public: z.boolean().optional(),
 });
 
 export type CreateCollectionInput = z.infer<typeof createCollectionSchema>;
@@ -18,6 +19,7 @@ export type CreateCollectionInput = z.infer<typeof createCollectionSchema>;
 export const updateCollectionSchema = z.object({
   name: z.string().min(1, "Collection name cannot be empty").max(255).optional(),
   description: z.string().max(1000).optional().nullable(), // Allow explicitly setting description to null
+  is_public: z.boolean().optional(),
 });
 
 export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;

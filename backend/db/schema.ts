@@ -115,6 +115,7 @@ export const collections = pgTable("collections", {
 	id: text().primaryKey().notNull(),
 	name: varchar({ length: 255 }).notNull(),
 	description: text(),
+	isPublic: boolean("is_public").default(false).notNull(),
 	ownerId: text("owner_id").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),

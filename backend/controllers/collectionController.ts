@@ -40,7 +40,7 @@ export const getUserCollections = async (req: Request, res: Response, next: Next
         // Using a subquery approach to avoid DISTINCT issues with JSON
         // Also includes user's permission: 'owner', 'edit', or 'view'
         const collections = await sql`
-            SELECT c.id, c.name, c.description, c.owner_id, c.created_at, c.updated_at,
+            SELECT c.id, c.name, c.description, c.is_public, c.owner_id, c.created_at, c.updated_at,
                    u.username as owner_username, COALESCE(u.image, u.avatar_url) as owner_avatar,
                    (
                        SELECT COALESCE(json_agg(movie_id), '[]'::json)
@@ -80,13 +80,15 @@ export const getUserCollections = async (req: Request, res: Response, next: Next
 export const getCollectionById = async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.userId;
     const { collectionId } = req.params;
-    if (!userId) {
-        res.sendStatus(401);
-        return;
-    }
     try {
         const collectionResult = await sql`
-            SELECT c.*, u.username as owner_username, COALESCE(u.image, u.avatar_url) as owner_avatar
+            SELECT c.*, u.username as owner_username, COALESCE(u.image, u.avatar_url) as owner_avatar,
+                   (
+                       SELECT cc.permission
+                       FROM collection_collaborators cc
+                       WHERE cc.collection_id = c.id AND cc.user_id = ${userId ?? ''}
+                       LIMIT 1
+                   ) as collaborator_permission
             FROM collections c
             JOIN "user" u ON c.owner_id = u.id
             WHERE c.id = ${collectionId}
@@ -102,12 +104,20 @@ export const getCollectionById = async (req: Request, res: Response, next: NextF
              id: collectionData.id,
              name: collectionData.name,
              description: collectionData.description,
+             is_public: collectionData.is_public,
              owner_id: collectionData.owner_id,
              created_at: collectionData.created_at,
              updated_at: collectionData.updated_at,
              owner_username: collectionData.owner_username,
              owner_avatar: collectionData.owner_avatar,
+             user_permission: !userId
+                ? undefined
+                : collectionData.owner_id === userId
+                    ? 'owner'
+                    : (collectionData.collaborator_permission as 'view' | 'edit' | null) ?? undefined,
         };
+
+        const canViewMembers = collectionSummary.user_permission === 'owner' || collectionSummary.user_permission === 'edit' || collectionSummary.user_permission === 'view';
 
         const moviesResult = await sql`
             SELECT cm.movie_id, cm.is_movie, cm.added_at, cm.added_by_user_id, COALESCE(u.username, u.name) as added_by_username
@@ -117,16 +127,16 @@ export const getCollectionById = async (req: Request, res: Response, next: NextF
             ORDER BY cm.added_at DESC
         `;
 
-        const collaboratorsResult = await sql`
-            SELECT cc.user_id, cc.permission, u.username, u.email, COALESCE(u.image, u.avatar_url) as avatar_url
+        const collaboratorsResult = canViewMembers ? await sql`
+            SELECT cc.user_id, cc.permission, COALESCE(u.username, u.name) as username, u.email, COALESCE(u.image, u.avatar_url) as avatar_url
             FROM collection_collaborators cc
             JOIN "user" u ON cc.user_id = u.id
             WHERE cc.collection_id = ${collectionId}
-        `;
+        ` : [];
         
         const responseData: CollectionDetailsResponse = {
              collection: collectionSummary,
-             movies: (moviesResult as (CollectionMovieEntry & { added_by_username: string | null; added_by_user_id: string })[]).map(m => ({ movie_id: m.movie_id, added_at: m.added_at, added_by_username: m.added_by_username, added_by_user_id: m.added_by_user_id, is_movie: m.is_movie })), 
+             movies: (moviesResult as (CollectionMovieEntry & { added_by_username: string | null; added_by_user_id: string })[]).map(m => ({ movie_id: m.movie_id, added_at: m.added_at, added_by_username: canViewMembers ? m.added_by_username : null, added_by_user_id: m.added_by_user_id, is_movie: m.is_movie })), 
              collaborators: collaboratorsResult as CollectionCollaborator[]
         };
 
@@ -148,13 +158,13 @@ export const createCollection = async (req: Request, res: Response, next: NextFu
             res.status(400).json({ message: 'Validation failed', errors: validation.error.issues });
             return;
         }
-        const { name, description } = validation.data;
+        const { name, description, is_public = false } = validation.data;
         const newCollectionId = generateId(21);
         const newShareableId = generateId(12);
 
         const result = await sql`
-            INSERT INTO collections (id, name, description, owner_id, shareable_id)
-            VALUES (${newCollectionId}, ${name}, ${description}, ${userId}, ${newShareableId})
+            INSERT INTO collections (id, name, description, is_public, owner_id, shareable_id)
+            VALUES (${newCollectionId}, ${name}, ${description}, ${is_public}, ${userId}, ${newShareableId})
             RETURNING *
         `;
 
@@ -177,37 +187,27 @@ export const updateCollection = async (req: Request, res: Response, next: NextFu
             res.status(400).json({ message: 'Validation failed', errors: validation.error.issues });
             return;
         }
-        const { name, description } = validation.data;
+        const { name, description, is_public } = validation.data;
 
-        if (name === undefined && description === undefined) {
+        const hasName = Object.prototype.hasOwnProperty.call(validation.data, 'name');
+        const hasDescription = Object.prototype.hasOwnProperty.call(validation.data, 'description');
+        const hasIsPublic = Object.prototype.hasOwnProperty.call(validation.data, 'is_public');
+
+        if (!hasName && !hasDescription && !hasIsPublic) {
              res.status(400).json({ message: 'No update data provided' });
              return;
         }
 
-        // Build the update dynamically using tagged template
-        let result;
-        if (name !== undefined && description !== undefined) {
-            result = await sql`
-                UPDATE collections 
-                SET updated_at = CURRENT_TIMESTAMP, name = ${name}, description = ${description}
-                WHERE id = ${collectionId}
-                RETURNING *
-            `;
-        } else if (name !== undefined) {
-            result = await sql`
-                UPDATE collections 
-                SET updated_at = CURRENT_TIMESTAMP, name = ${name}
-                WHERE id = ${collectionId}
-                RETURNING *
-            `;
-        } else {
-            result = await sql`
-                UPDATE collections 
-                SET updated_at = CURRENT_TIMESTAMP, description = ${description}
-                WHERE id = ${collectionId}
-                RETURNING *
-            `;
-        }
+        const result = await sql`
+            UPDATE collections
+            SET
+                updated_at = CURRENT_TIMESTAMP,
+                name = CASE WHEN ${hasName} THEN ${name} ELSE name END,
+                description = CASE WHEN ${hasDescription} THEN ${description} ELSE description END,
+                is_public = CASE WHEN ${hasIsPublic} THEN ${is_public} ELSE is_public END
+            WHERE id = ${collectionId}
+            RETURNING *
+        `;
 
         if (result.length === 0) {
             res.status(404).json({ message: 'Collection not found or no changes made' });
@@ -418,7 +418,7 @@ export const addCollaborator = async (req: Request, res: Response, next: NextFun
             `;
             
             const collaboratorDetails = await sql`
-                SELECT u.id as user_id, cc.permission, u.username, u.email, COALESCE(u.image, u.avatar_url) as avatar_url
+                SELECT u.id as user_id, cc.permission, COALESCE(u.username, u.name) as username, u.email, COALESCE(u.image, u.avatar_url) as avatar_url
                 FROM "user" u
                 JOIN collection_collaborators cc ON u.id = cc.user_id
                 WHERE cc.id = ${(insertResult[0] as {id: string}).id}

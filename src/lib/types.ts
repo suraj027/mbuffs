@@ -279,6 +279,7 @@ export interface CollectionSummary {
   id: string;
   name: string;
   description: string | null;
+  is_public?: boolean;
   owner_id: string;
   created_at: string; // ISO string from DB
   updated_at: string; // ISO string from DB
@@ -322,12 +323,14 @@ export interface UserCollectionsResponse {
 export interface CreateCollectionInput {
   name: string;
   description?: string | null;
+  is_public?: boolean;
 }
 
 // Input type for updating collection details
 export interface UpdateCollectionInput {
   name?: string;
   description?: string | null;
+  is_public?: boolean;
 }
 
 // Input type for adding a movie to a collection

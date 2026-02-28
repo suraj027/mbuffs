@@ -31,7 +31,6 @@ router.post('/', requireAuth as RequestHandler, createCollection as RequestHandl
 
 router.get(
     '/:collectionId',
-    requireAuth as RequestHandler,                     
     requireCollectionPermission('view') as RequestHandler, // Cast returned handler
     getCollectionById as RequestHandler         
 );

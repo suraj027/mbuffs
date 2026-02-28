@@ -20,7 +20,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getImageUrl } from "@/lib/api";
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
-import { Film, Trash2, UserPlus, Loader2, Check, UserMinus, Plus, Search as SearchIcon, MoreVertical, LogOut } from 'lucide-react';
+import { Film, Trash2, UserPlus, Loader2, Check, UserMinus, Plus, Search as SearchIcon, MoreVertical, LogOut, LogIn, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -47,7 +47,7 @@ const ITEMS_PER_PAGE = 30;
 
 const CollectionDetail = () => {
     const { collectionId } = useParams<{ collectionId: string }>();
-    const { user: currentUser, isLoggedIn } = useAuth();
+    const { user: currentUser, isLoggedIn, signIn } = useAuth();
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [isAddCollabOpen, setIsAddCollabOpen] = useState(false);
@@ -56,6 +56,7 @@ const CollectionDetail = () => {
     const [mediaTypeFilter, setMediaTypeFilter] = useState('all');
     const [visibleItemsCount, setVisibleItemsCount] = useState(ITEMS_PER_PAGE);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isBannerDismissed, setIsBannerDismissed] = useState(false);
 
     const collectionQueryKey = ['collection', collectionId];
 
@@ -67,7 +68,7 @@ const CollectionDetail = () => {
     } = useQuery<CollectionDetails, Error>({
         queryKey: collectionQueryKey,
         queryFn: () => fetchCollectionDetailsApi(collectionId!),
-        enabled: !!collectionId && isLoggedIn,
+        enabled: !!collectionId,
     });
 
     const movieIds = collectionDetails?.movies.map(m => m.movie_id) ?? [];
@@ -243,6 +244,7 @@ const CollectionDetail = () => {
     const collection = collectionDetails?.collection;
     const isOwner = collection?.owner_id === currentUser?.id;
     const canEdit = isOwner || collectionDetails?.collaborators.some(c => c.user_id === currentUser?.id && c.permission === 'edit');
+    const canViewMembers = collection?.user_permission === 'owner' || collection?.user_permission === 'edit' || collection?.user_permission === 'view';
 
     const isLoading = isLoadingCollection;
     const isError = isCollectionError;
@@ -296,16 +298,59 @@ const CollectionDetail = () => {
     return (
         <>
             <Navbar />
-            <main className="container py-10 max-w-6xl mx-auto">
+            <main className="container py-6 sm:py-10 max-w-6xl mx-auto">
                 {/* Header */}
-                <div className="mb-10">
-                    <h1 className="text-4xl font-semibold tracking-tight mb-2">{collection.name}</h1>
+                <div className="mb-8 sm:mb-10">
+                    {!isLoggedIn && !isBannerDismissed && (
+                        <div className="relative mb-4 sm:mb-6 rounded-xl border border-primary/20 bg-primary/5 p-3.5 sm:p-5">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute right-2 top-2 h-8 w-8 text-muted-foreground hover:text-foreground sm:hidden"
+                                onClick={() => setIsBannerDismissed(true)}
+                                aria-label="Dismiss sign-in banner"
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="max-w-2xl pr-10 sm:pr-0">
+                                    <p className="text-base sm:text-lg font-medium">Enjoying this collection?</p>
+                                    <p className="text-sm sm:text-base text-muted-foreground">Sign in to create and share your own public collections.</p>
+                                </div>
+
+                                <div className="mt-1 sm:mt-0 flex w-full sm:w-auto items-center gap-2 self-stretch sm:self-auto shrink-0 sm:justify-end">
+                                    <Button onClick={signIn} size="sm" className="gap-2 h-11 sm:h-10 !px-10 sm:!px-7 flex-1 sm:flex-none sm:w-auto">
+                                        <span>Create yours</span>
+                                        <span className="inline-flex items-center">
+                                            <LogIn className="h-4 w-4" />
+                                        </span>
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="hidden sm:inline-flex h-8 w-8 text-muted-foreground hover:text-foreground"
+                                        onClick={() => setIsBannerDismissed(true)}
+                                        aria-label="Dismiss sign-in banner"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2 leading-tight break-words">{collection.name}</h1>
                     {collection.description && (
                         <p className="text-muted-foreground text-lg mb-4 max-w-2xl">{collection.description}</p>
                     )}
                     
-                    {/* Owner & Collaborators Row */}
                     <div className="flex items-center gap-4 flex-wrap">
+                        {collection.is_public && (
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-primary bg-primary/10 px-2 py-1 rounded-full">
+                                Public
+                            </span>
+                        )}
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Avatar className="h-6 w-6">
                                 <AvatarImage src={collection.owner_avatar} />
@@ -313,34 +358,36 @@ const CollectionDetail = () => {
                             </Avatar>
                             <span>{collection.owner_username}</span>
                         </div>
-                        
-                        <span className="text-muted-foreground/30">|</span>
-                        
-                        {/* Collaborators */}
-                        <Dialog open={isCollabListOpen} onOpenChange={setIsCollabListOpen}>
-                            <DialogTrigger asChild>
-                                <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                                    <div className="flex -space-x-2">
-                                        <Avatar className="h-6 w-6 border-2 border-background">
-                                            <AvatarImage src={collection.owner_avatar} />
-                                            <AvatarFallback className="text-xs">{getInitials(collection.owner_username)}</AvatarFallback>
-                                        </Avatar>
-                                        {collectionDetails.collaborators.slice(0, 2).map((c) => (
-                                            <Avatar key={c.user_id} className="h-6 w-6 border-2 border-background">
-                                                <AvatarImage src={c.avatar_url} />
-                                                <AvatarFallback className="text-xs">{getInitials(c.username)}</AvatarFallback>
-                                            </Avatar>
-                                        ))}
-                                        {collectionDetails.collaborators.length > 2 && (
-                                            <div className="h-6 w-6 rounded-full bg-muted border-2 border-background flex items-center justify-center text-xs">
-                                                +{collectionDetails.collaborators.length - 2}
+
+                        {canViewMembers && (
+                            <>
+                                <span className="text-muted-foreground/30">|</span>
+
+                                {/* Collaborators */}
+                                <Dialog open={isCollabListOpen} onOpenChange={setIsCollabListOpen}>
+                                    <DialogTrigger asChild>
+                                        <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                                            <div className="flex -space-x-2">
+                                                <Avatar className="h-6 w-6 border-2 border-background">
+                                                    <AvatarImage src={collection.owner_avatar} />
+                                                    <AvatarFallback className="text-xs">{getInitials(collection.owner_username)}</AvatarFallback>
+                                                </Avatar>
+                                                {collectionDetails.collaborators.slice(0, 2).map((c) => (
+                                                    <Avatar key={c.user_id} className="h-6 w-6 border-2 border-background">
+                                                        <AvatarImage src={c.avatar_url} />
+                                                        <AvatarFallback className="text-xs">{getInitials(c.username)}</AvatarFallback>
+                                                    </Avatar>
+                                                ))}
+                                                {collectionDetails.collaborators.length > 2 && (
+                                                    <div className="h-6 w-6 rounded-full bg-muted border-2 border-background flex items-center justify-center text-xs">
+                                                        +{collectionDetails.collaborators.length - 2}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
-                                    <span>{totalCollaborators} {totalCollaborators === 1 ? 'member' : 'members'}</span>
-                                </button>
-                            </DialogTrigger>
-                            <DialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
+                                            <span>{totalCollaborators} {totalCollaborators === 1 ? 'member' : 'members'}</span>
+                                        </button>
+                                    </DialogTrigger>
+                                    <DialogContent className="w-[90%] sm:max-w-[400px] rounded-lg">
                                 <DialogHeader>
                                     <DialogTitle>Members</DialogTitle>
                                     <DialogDescription>People who can access this collection.</DialogDescription>
@@ -522,8 +569,10 @@ const CollectionDetail = () => {
                                         <Button variant="secondary" size="sm">Done</Button>
                                     </DialogClose>
                                 </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
+                                    </DialogContent>
+                                </Dialog>
+                            </>
+                        )}
                     </div>
                 </div>
 

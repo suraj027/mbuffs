@@ -9,13 +9,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Link } from 'react-router-dom';
 import { Plus, Film, Loader2, MoreHorizontal, Trash2, Copy, Edit } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { toast } from "sonner";
 import { useAuth } from '@/hooks/useAuth';
 import { getImageUrl } from '@/lib/api';
@@ -23,14 +24,16 @@ import { getImageUrl } from '@/lib/api';
 const frontendCreateCollectionSchema = z.object({
   name: z.string().min(1, "Collection name cannot be empty").max(255),
   description: z.string().max(1000).optional(),
+  is_public: z.boolean().default(false),
 });
-type FrontendCreateCollectionInput = z.infer<typeof frontendCreateCollectionSchema>;
+type FrontendCreateCollectionInput = z.input<typeof frontendCreateCollectionSchema>;
 
 const frontendUpdateCollectionSchema = z.object({
   name: z.string().min(1, "Collection name cannot be empty").max(255),
   description: z.string().max(1000).optional().nullable(),
+  is_public: z.boolean().default(false),
 });
-type FrontendUpdateCollectionInput = z.infer<typeof frontendUpdateCollectionSchema>;
+type FrontendUpdateCollectionInput = z.input<typeof frontendUpdateCollectionSchema>;
 
 const COLLECTIONS_QUERY_KEY = ['collections', 'user'];
 
@@ -158,8 +161,11 @@ const Collections = () => {
     queryFn: fetchUserCollectionsApi,
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FrontendCreateCollectionInput>({
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<FrontendCreateCollectionInput>({
     resolver: zodResolver(frontendCreateCollectionSchema),
+    defaultValues: {
+      is_public: false,
+    }
   });
 
   const createMutation = useMutation<{
@@ -170,6 +176,7 @@ const Collections = () => {
       queryClient.invalidateQueries({ queryKey: COLLECTIONS_QUERY_KEY });
       toast.success(`Collection "${data.collection.name}" created!`);
       reset();
+      setValue('is_public', false);
       setIsCreateDialogOpen(false);
     },
     onError: (error) => {
@@ -193,8 +200,11 @@ const Collections = () => {
     }
   });
 
-  const { register: registerEdit, handleSubmit: handleSubmitEdit, reset: resetEdit, setValue: setEditValue, formState: { errors: editErrors } } = useForm<FrontendUpdateCollectionInput>({
+  const { register: registerEdit, handleSubmit: handleSubmitEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit, formState: { errors: editErrors } } = useForm<FrontendUpdateCollectionInput>({
     resolver: zodResolver(frontendUpdateCollectionSchema),
+    defaultValues: {
+      is_public: false,
+    }
   });
 
   const editCollectionMutation = useMutation<{ collection: CollectionSummary }, Error, { collectionId: string; data: UpdateCollectionInput }>({
@@ -224,6 +234,7 @@ const Collections = () => {
     setEditingCollection(collection);
     setEditValue("name", collection.name);
     setEditValue("description", collection.description ?? '');
+    setEditValue("is_public", Boolean(collection.is_public));
     setIsEditDialogOpen(true);
   };
 
@@ -240,6 +251,9 @@ const Collections = () => {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   }
+
+  const isCreatePublic = watch('is_public');
+  const isEditPublic = watchEdit('is_public');
 
   return (
     <>
@@ -289,6 +303,21 @@ const Collections = () => {
                     />
                     {errors.description && <p className="text-destructive text-sm">{errors.description.message}</p>}
                   </div>
+                  <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="is-public" className="text-sm font-medium">Public collection</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Anyone with the link can view. Only members can edit.
+                        </p>
+                      </div>
+                      <Switch
+                        id="is-public"
+                        checked={Boolean(isCreatePublic)}
+                        onCheckedChange={(checked) => setValue('is_public', checked)}
+                      />
+                    </div>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button type="submit" disabled={createMutation.isPending}>
@@ -337,9 +366,16 @@ const Collections = () => {
                       <h3 className="font-medium text-foreground group-hover:text-primary transition-colors truncate">
                         {collection.name}
                       </h3>
-                      <p className="text-sm text-muted-foreground truncate">
-                        {collection.description || `Created ${formatDate(collection.created_at)}`}
-                      </p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {collection.is_public && (
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
+                            Public
+                          </span>
+                        )}
+                        <p className="text-sm text-muted-foreground truncate">
+                          {collection.description || `Created ${formatDate(collection.created_at)}`}
+                        </p>
+                      </div>
                     </div>
                   </Link>
 
@@ -440,7 +476,7 @@ const Collections = () => {
                 <DialogTitle>Edit Collection</DialogTitle>
                 <DialogDescription>Update your collection details.</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-5">
+                <div className="grid gap-4 py-5">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name">Name</Label>
                   <Input id="edit-name" {...registerEdit("name")} aria-invalid={editErrors.name ? "true" : "false"} />
@@ -450,6 +486,21 @@ const Collections = () => {
                   <Label htmlFor="edit-description">Description</Label>
                   <Textarea id="edit-description" className="resize-none" rows={3} {...registerEdit("description")} aria-invalid={editErrors.description ? "true" : "false"} />
                   {editErrors.description && <p className="text-destructive text-sm">{editErrors.description.message}</p>}
+                </div>
+                <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="edit-is-public" className="text-sm font-medium">Public collection</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Anyone with the link can view. Only members can edit.
+                      </p>
+                    </div>
+                    <Switch
+                      id="edit-is-public"
+                      checked={Boolean(isEditPublic)}
+                      onCheckedChange={(checked) => setEditValue('is_public', checked)}
+                    />
+                  </div>
                 </div>
               </div>
               <DialogFooter>

@@ -41,6 +41,7 @@ export interface CollectionSummary {
   id: string;
   name: string;
   description: string | null;
+  is_public?: boolean;
   owner_id: string;
   created_at: string; // ISO string from DB
   updated_at: string; // ISO string from DB
@@ -72,6 +73,7 @@ export interface CollectionRow {
     id: string;
     name: string;
     description: string | null;
+    is_public?: boolean;
     owner_id: string;
     created_at: string; 
     updated_at: string; 
