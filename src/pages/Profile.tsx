@@ -237,7 +237,7 @@ const Profile = () => {
 
                 {/* User Info Card */}
                 <Card className="mb-6">
-                    <CardContent className="pt-6">
+                    <CardContent>
                         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
                             <Avatar className="h-20 w-20 shrink-0">
                                 <AvatarImage
