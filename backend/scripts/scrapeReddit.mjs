@@ -60,10 +60,10 @@ const MOVIE_SUBREDDITS = process.env.REDDIT_SUBREDDITS
 
 const POSTS_PER_SUBREDDIT = parseInt(process.env.REDDIT_POSTS_PER_SUB || '25', 10);
 const MIN_SCORE = parseInt(process.env.REDDIT_MIN_SCORE || '10', 10);
-const TIMEFRAME = process.env.REDDIT_TIMEFRAME || 'week'; // hour, day, week, month, year, all
+const TIMEFRAME = process.env.REDDIT_TIMEFRAME || 'all'; // hour, day, week, month, year, all
 
-// Cache configuration - only re-scrape if data is older than this (default: 1 week)
-const CACHE_TTL_HOURS = parseInt(process.env.REDDIT_CACHE_TTL_HOURS || '168', 10); // 168 hours = 1 week
+// Cache configuration - only re-scrape if data is older than this (default: 1 month)
+const CACHE_TTL_HOURS = parseInt(process.env.REDDIT_CACHE_TTL_HOURS || '720', 10); // 720 hours = 30 days
 
 // Generate a hash of the subreddit list to detect config changes
 const SUBREDDITS_HASH = MOVIE_SUBREDDITS.slice().sort().join(',').toLowerCase();
