@@ -1,5 +1,6 @@
 import { sql } from '../lib/db.js';
 import { createHash } from 'node:crypto';
+import { getRedditRecommendations, type RedditRecommendation } from './redditService.js';
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
@@ -31,6 +32,8 @@ interface RecommendationExplainability {
     source_appearances: number;
     matched_genres: number[];
     because_you_liked?: string[];
+    reddit_mentions?: number; // Number of Reddit mentions
+    reddit_sentiment?: 'positive' | 'neutral' | 'negative'; // Reddit sentiment
     score_breakdown: {
         base: number;
         popularity: number;
@@ -39,6 +42,7 @@ interface RecommendationExplainability {
         director_boost: number;
         actor_boost: number;
         primary_boost: number;
+        reddit_boost: number; // Reddit popularity boost
         total: number;
     };
 }
@@ -153,6 +157,115 @@ interface RecommendationCacheDebugEntry {
 const RECOMMENDATION_CACHE_VERSION = 'v4';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const recommendationCacheLocks = new Map<string, Promise<void>>();
+
+// Reddit boost configuration
+const REDDIT_BOOST_ENABLED = true;
+const REDDIT_BOOST_MULTIPLIER = 15; // Points per mention
+const REDDIT_POSITIVE_SENTIMENT_BONUS = 10;
+
+/**
+ * Fetch Reddit recommendations and create a lookup map by TMDB ID
+ * Returns a map where key is tmdbId and value contains mention info
+ * 
+ * Note: Reddit data is scraped at build time (see scripts/scrapeReddit.mjs)
+ * This function simply loads the pre-scraped data from the database.
+ */
+async function getRedditBoostMap(): Promise<Map<string, { mentions: number; sentiment: string | null; totalScore: number }>> {
+    const boostMap = new Map<string, { mentions: number; sentiment: string | null; totalScore: number }>();
+    
+    if (!REDDIT_BOOST_ENABLED) {
+        return boostMap;
+    }
+
+    try {
+        const redditRecs = await getRedditRecommendations({
+            minMentions: 1,
+            limit: 500,
+            onlyWithTmdb: true,
+        });
+
+        for (const rec of redditRecs) {
+            if (rec.tmdbId) {
+                boostMap.set(rec.tmdbId, {
+                    mentions: rec.mentionCount,
+                    sentiment: rec.sentiment,
+                    totalScore: rec.totalScore,
+                });
+            }
+        }
+
+        console.log(`Loaded ${boostMap.size} Reddit recommendations for boosting`);
+    } catch (error) {
+        console.error('Error loading Reddit recommendations for boosting:', error);
+    }
+
+    return boostMap;
+}
+
+/**
+ * Calculate Reddit boost score for a given TMDB ID
+ */
+function calculateRedditBoost(
+    tmdbId: string,
+    redditBoostMap: Map<string, { mentions: number; sentiment: string | null; totalScore: number }>
+): { boost: number; mentions: number; sentiment: string | null } {
+    const redditData = redditBoostMap.get(tmdbId);
+    
+    if (!redditData) {
+        return { boost: 0, mentions: 0, sentiment: null };
+    }
+
+    let boost = redditData.mentions * REDDIT_BOOST_MULTIPLIER;
+    
+    // Extra boost for positive sentiment
+    if (redditData.sentiment === 'positive') {
+        boost += REDDIT_POSITIVE_SENTIMENT_BONUS;
+    }
+    
+    // Cap boost at a reasonable max to avoid overwhelming other signals
+    boost = Math.min(boost, 100);
+
+    return {
+        boost,
+        mentions: redditData.mentions,
+        sentiment: redditData.sentiment,
+    };
+}
+
+/**
+ * Apply Reddit boosts to a list of recommendation candidates
+ */
+function applyRedditBoosts(
+    candidates: RecommendationCandidate[],
+    redditBoostMap: Map<string, { mentions: number; sentiment: string | null; totalScore: number }>
+): RecommendationCandidate[] {
+    return candidates.map(candidate => {
+        const tmdbId = candidate.item.id.toString();
+        const { boost, mentions, sentiment } = calculateRedditBoost(tmdbId, redditBoostMap);
+
+        if (boost > 0) {
+            const explainability = candidate.item.explainability;
+            if (explainability) {
+                explainability.reddit_mentions = mentions;
+                explainability.reddit_sentiment = sentiment as 'positive' | 'neutral' | 'negative' | undefined;
+                explainability.score_breakdown.reddit_boost = boost;
+                explainability.score_breakdown.total += boost;
+                
+                // Add reason code if not already present
+                if (!explainability.reason_codes.includes('reddit_popular')) {
+                    explainability.reason_codes.push('reddit_popular');
+                }
+            }
+            
+            return {
+                ...candidate,
+                score: candidate.score + boost,
+            };
+        }
+        
+        return candidate;
+    });
+}
 
 function selectTopKByScore(candidates: RecommendationCandidate[], k: number): RecommendationCandidate[] {
     if (k <= 0 || candidates.length === 0) {
@@ -796,6 +909,7 @@ async function generateColdStartRecommendations(
                         director_boost: 0,
                         actor_boost: 0,
                         primary_boost: 0,
+                        reddit_boost: 0,
                         total: totalScore
                     }
                 }
@@ -1011,6 +1125,7 @@ export async function generateRecommendations(
                                 director_boost: 0,
                                 actor_boost: 0,
                                 primary_boost: 0,
+                                reddit_boost: 0,
                                 total: combinedScore
                             }
                         }
@@ -1111,6 +1226,7 @@ export async function generateRecommendations(
                                 director_boost: directorBoost,
                                 actor_boost: 0,
                                 primary_boost: 0,
+                                reddit_boost: 0,
                                 total: combinedScore
                             }
                         }
@@ -1205,6 +1321,7 @@ export async function generateRecommendations(
                                 director_boost: 0,
                                 actor_boost: actorBoost,
                                 primary_boost: 0,
+                                reddit_boost: 0,
                                 total: combinedScore
                             }
                         }
@@ -1216,7 +1333,13 @@ export async function generateRecommendations(
         });
     });
     
-    const allCandidates = Array.from(allRecommendations.values());
+    // Apply Reddit popularity boosts to recommendations
+    const redditBoostMap = await getRedditBoostMap();
+    const allCandidates = applyRedditBoosts(
+        Array.from(allRecommendations.values()),
+        redditBoostMap
+    );
+    
     const totalResults = allCandidates.length;
     const totalPages = Math.ceil(totalResults / limit);
     const paginatedResults = paginateTopCandidates(allCandidates, page, limit).map(r => r.item);
@@ -1398,6 +1521,7 @@ export async function generateCategoryRecommendations(
                                 director_boost: 0,
                                 actor_boost: 0,
                                 primary_boost: 0,
+                                reddit_boost: 0,
                                 total: combinedScore
                             }
                         }
@@ -1667,6 +1791,7 @@ export async function generateGenreRecommendations(
                                 director_boost: 0,
                                 actor_boost: 0,
                                 primary_boost: primaryBoost,
+                                reddit_boost: 0,
                                 total: combinedScore
                             }
                         }
@@ -1746,6 +1871,7 @@ export async function generateGenreRecommendations(
                         director_boost: 0,
                         actor_boost: 0,
                         primary_boost: 0,
+                        reddit_boost: 0,
                         total: combinedScore
                     }
                 }
@@ -2011,6 +2137,7 @@ export async function generatePersonalizedTheatricalReleases(
                         director_boost: directorBoost,
                         actor_boost: actorBoost,
                         primary_boost: 0,
+                        reddit_boost: 0,
                         total: score
                     }
                 }

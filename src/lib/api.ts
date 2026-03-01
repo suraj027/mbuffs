@@ -819,3 +819,113 @@ export const fetchCombinedRatingsApi = async (
         return null;
     }
 };
+
+// --- Reddit Recommendations API Functions ---
+
+export interface RedditRecommendation {
+    id: string;
+    title: string;
+    tmdbId: string | null;
+    mediaType: 'movie' | 'tv';
+    subreddit: string;
+    postId: string;
+    postTitle: string;
+    mentionCount: number;
+    totalScore: number;
+    sentiment: 'positive' | 'neutral' | 'negative' | null;
+    genres: string[];
+    scrapedAt: string;
+    updatedAt: string;
+}
+
+export interface RedditRecommendationsResponse {
+    success: boolean;
+    count: number;
+    recommendations: RedditRecommendation[];
+}
+
+export interface RedditGenresResponse {
+    success: boolean;
+    genres: { genre: string; count: number }[];
+}
+
+export interface RedditStatusResponse {
+    success: boolean;
+    status: {
+        lastScrapedAt: string | null;
+        totalRecommendations: number;
+        needsScrape: boolean;
+    };
+}
+
+export interface RedditScrapeResult {
+    success: boolean;
+    result?: {
+        totalPostsScraped: number;
+        totalMentionsFound: number;
+        recommendationsMatched: number;
+        recommendationsSaved: number;
+    };
+    message?: string;
+    lastScrapedAt?: string;
+    totalRecommendations?: number;
+}
+
+/**
+ * Fetch Reddit-sourced movie recommendations
+ */
+export const fetchRedditRecommendationsApi = async (options: {
+    genre?: string;
+    minMentions?: number;
+    sentiment?: 'positive' | 'neutral' | 'negative';
+    limit?: number;
+} = {}): Promise<RedditRecommendationsResponse> => {
+    const params = new URLSearchParams();
+    if (options.genre) params.append('genre', options.genre);
+    if (options.minMentions) params.append('minMentions', options.minMentions.toString());
+    if (options.sentiment) params.append('sentiment', options.sentiment);
+    if (options.limit) params.append('limit', options.limit.toString());
+    
+    const queryString = params.toString();
+    return fetchBackend(`/reddit/recommendations${queryString ? `?${queryString}` : ''}`);
+};
+
+/**
+ * Fetch Reddit recommendations filtered by genre
+ */
+export const fetchRedditRecommendationsByGenreApi = async (
+    genre: string,
+    limit: number = 20
+): Promise<RedditRecommendationsResponse & { genre: string }> => {
+    return fetchBackend(`/reddit/recommendations/genre/${encodeURIComponent(genre)}?limit=${limit}`);
+};
+
+/**
+ * Fetch available genres from Reddit recommendations
+ */
+export const fetchRedditGenresApi = async (): Promise<RedditGenresResponse> => {
+    return fetchBackend('/reddit/genres');
+};
+
+/**
+ * Fetch Reddit scraping status
+ */
+export const fetchRedditStatusApi = async (): Promise<RedditStatusResponse> => {
+    return fetchBackend('/reddit/status');
+};
+
+/**
+ * Trigger a Reddit scrape (requires authentication)
+ */
+export const triggerRedditScrapeApi = async (options: {
+    subreddits?: string[];
+    timeframe?: 'hour' | 'day' | 'week' | 'month' | 'year' | 'all';
+    postsPerSubreddit?: number;
+    genres?: string[];
+    force?: boolean;
+} = {}): Promise<RedditScrapeResult> => {
+    return fetchBackend('/reddit/scrape', {
+        method: 'POST',
+        body: JSON.stringify(options),
+    });
+};

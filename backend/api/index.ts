@@ -10,6 +10,7 @@ import contentRoutes from '../routes/contentRoutes.js';
 import userRoutes from '../routes/userRoutes.js';
 import recommendationRoutes from '../routes/recommendationRoutes.js';
 import parentalGuidanceRoutes from '../routes/parentalGuidanceRoutes.js';
+import redditRoutes from '../routes/redditRoutes.js';
 
 dotenv.config({
     path: './.env'
@@ -49,6 +50,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/ratings', parentalGuidanceRoutes);
+app.use('/api/reddit', redditRoutes);
 
 app.get('/api', (req: Request, res: Response) => {
     res.json({ message: `Welcome to the mbuffs API! ${process.env.FRONTEND_URL}` });

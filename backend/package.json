@@ -4,14 +4,16 @@
   "type": "module",
   "main": "dist/api/index.js",
   "scripts": {
-    "build": "node db/migrate.mjs && npx tsc",
+    "build": "node db/migrate.mjs && npx tsc && node scripts/scrapeReddit.mjs",
+    "build:no-scrape": "node db/migrate.mjs && npx tsc",
     "start": "NODE_OPTIONS='--loader ts-node/esm' node api/index.ts",
     "dev": "NODE_OPTIONS='--loader ts-node/esm' nodemon api/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node db/migrate.mjs",
     "db:push": "drizzle-kit push",
     "db:diff": "drizzle-kit push --verbose --strict",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "scrape:reddit": "node scripts/scrapeReddit.mjs"
   },
   "keywords": [],
   "author": "",

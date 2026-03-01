@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, unique, text, varchar, timestamp, boolean, primaryKey, pgSequence } from "drizzle-orm/pg-core"
+import { pgTable, index, foreignKey, unique, text, varchar, timestamp, boolean, primaryKey, pgSequence, integer } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const migrationsIdSeq = pgSequence("_migrations_id_seq", { startWith: "1", increment: "1", minValue: "1", maxValue: "2147483647", cache: "1", cycle: false })
@@ -272,4 +272,28 @@ export const scrapeMetadata = pgTable("scrape_metadata", {
 	itemsScraped: text("items_scraped"), // JSON array of scraped items
 }, (table) => [
 	unique("scrape_metadata_type_key").on(table.scrapeType),
+]);
+
+// ============================================================================
+// REDDIT RECOMMENDATIONS TABLE (scraped from Reddit)
+// ============================================================================
+export const redditRecommendations = pgTable("reddit_recommendations", {
+	id: text().primaryKey().notNull(),
+	title: text().notNull(), // Movie/TV title as mentioned on Reddit
+	tmdbId: text("tmdb_id"), // Matched TMDB ID (null if not found)
+	mediaType: text("media_type").notNull().default('movie'), // 'movie' or 'tv'
+	subreddit: text().notNull(), // Source subreddit
+	postId: text("post_id").notNull(), // Reddit post ID
+	postTitle: text("post_title"), // Reddit post title
+	mentionCount: integer("mention_count").default(1).notNull(), // How many times mentioned
+	totalScore: integer("total_score").default(0).notNull(), // Sum of upvotes
+	sentiment: text(), // 'positive', 'neutral', 'negative'
+	genres: text(), // JSON array of extracted genre keywords
+	scrapedAt: timestamp("scraped_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+	index("idx_reddit_recommendations_tmdb_id").using("btree", table.tmdbId.asc().nullsLast().op("text_ops")),
+	index("idx_reddit_recommendations_media_type").using("btree", table.mediaType.asc().nullsLast().op("text_ops")),
+	index("idx_reddit_recommendations_subreddit").using("btree", table.subreddit.asc().nullsLast().op("text_ops")),
+	unique("reddit_recommendations_title_key").on(table.title),
 ]);
