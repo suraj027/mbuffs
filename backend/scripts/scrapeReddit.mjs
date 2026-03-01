@@ -95,7 +95,15 @@ function generateId(length = 15) {
 // Reddit rate limit: ~10 requests per minute for unauthenticated
 const REDDIT_MAX_RETRIES = 3;
 
+// Track if we've seen a 403 (datacenter IP blocked)
+let redditBlocked = false;
+
 async function fetchRedditJson(url, retryCount = 0) {
+    // If we already know Reddit is blocking us, skip further requests
+    if (redditBlocked) {
+        return null;
+    }
+
     try {
         const jsonUrl = url.endsWith('.json') ? url : `${url}.json`;
         
@@ -107,6 +115,14 @@ async function fetchRedditJson(url, retryCount = 0) {
         });
 
         if (!response.ok) {
+            // 403 = Reddit blocking datacenter IPs (common in CI environments)
+            if (response.status === 403) {
+                redditBlocked = true;
+                console.warn(`  Reddit returned 403 Forbidden - datacenter IP likely blocked`);
+                console.warn(`  This is expected in CI environments (Vercel, GitHub Actions, etc.)`);
+                return null;
+            }
+            
             if (response.status === 429 && retryCount < REDDIT_MAX_RETRIES) {
                 const delay = 10000 * (retryCount + 1); // 10s, 20s, 30s
                 console.warn(`  Reddit rate limit hit, waiting ${delay/1000}s (retry ${retryCount + 1}/${REDDIT_MAX_RETRIES})...`);
@@ -687,6 +703,9 @@ async function isCacheValid() {
 // MAIN
 // ============================================================================
 
+// Detect CI environment
+const IS_CI = !!(process.env.CI || process.env.VERCEL || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI);
+
 async function main() {
     console.log('=== Reddit Recommendations Scraper ===\n');
     console.log('Configuration:');
@@ -696,6 +715,7 @@ async function main() {
     console.log(`  Timeframe: ${TIMEFRAME}`);
     console.log(`  Cache TTL: ${CACHE_TTL_HOURS} hours`);
     console.log(`  Force scrape: ${FORCE_SCRAPE}`);
+    console.log(`  CI environment: ${IS_CI ? 'Yes' : 'No'}`);
     console.log('');
 
     // Check cache unless --force is used
@@ -719,6 +739,28 @@ async function main() {
     try {
         const recommendations = await scrapeReddit();
         
+        // Check if Reddit blocked us (403 from datacenter IP)
+        if (redditBlocked) {
+            console.log('\n=== Scrape Skipped (Reddit Blocked) ===');
+            console.log('  Reddit returned 403 Forbidden - this is common in CI environments');
+            console.log('  Datacenter IPs (Vercel, AWS, etc.) are often blocked by Reddit');
+            console.log('  ');
+            console.log('  To populate Reddit recommendations:');
+            console.log('  1. Run locally: npm run scrape:reddit');
+            console.log('  2. Or use Reddit OAuth API (more reliable but requires setup)');
+            console.log('  ');
+            console.log('  Build will continue - existing cached data (if any) will be used.');
+            // Exit successfully - don't fail the build
+            return;
+        }
+        
+        if (recommendations.length === 0) {
+            console.log('\n=== No Recommendations Found ===');
+            console.log('  No movie/show titles could be extracted.');
+            console.log('  Build will continue without new Reddit data.');
+            return;
+        }
+        
         console.log('\n  Saving to database...');
         const savedCount = await saveToDatabase(recommendations);
         
@@ -728,6 +770,17 @@ async function main() {
         console.log(`  Duration: ${duration}s`);
         
     } catch (error) {
+        // In CI, don't fail the build for scrape errors
+        if (IS_CI) {
+            console.error('\n=== Scrape Failed (Non-Blocking) ===');
+            console.error(`  Error: ${error.message}`);
+            console.error('  Build will continue - existing cached data (if any) will be used.');
+            console.error('  To populate Reddit recommendations, run locally: npm run scrape:reddit');
+            // Exit successfully - don't fail the build
+            return;
+        }
+        
+        // Outside CI, fail as expected
         console.error('Scrape failed:', error);
         process.exit(1);
     }
