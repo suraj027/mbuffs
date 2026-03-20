@@ -68,6 +68,17 @@ const Auth = () => {
     const turnstileRef = useRef<TurnstileInstance | null>(null);
     const [lastUsedMethod, setLastUsedMethod] = useState<AuthMethod | null>(null);
 
+    // All hooks must be called before any early returns
+    const signInForm = useForm<SignInValues>({
+        resolver: zodResolver(signInSchema),
+        defaultValues: { email: '', password: '' },
+    });
+
+    const signUpForm = useForm<SignUpValues>({
+        resolver: zodResolver(signUpSchema),
+        defaultValues: { firstName: '', lastName: '', email: '', password: '', confirmPassword: '' },
+    });
+
     useEffect(() => {
         const stored = localStorage.getItem(LAST_AUTH_METHOD_KEY) as AuthMethod | null;
         if (stored === 'google' || stored === 'email') {
@@ -94,14 +105,6 @@ const Auth = () => {
         setFormError(null);
         resetCaptcha();
     };
-
-    // ========================================================================
-    // Sign In form
-    // ========================================================================
-    const signInForm = useForm<SignInValues>({
-        resolver: zodResolver(signInSchema),
-        defaultValues: { email: '', password: '' },
-    });
 
     const onSignIn = async (values: SignInValues) => {
         if (!captchaToken) {
@@ -144,14 +147,6 @@ const Auth = () => {
         }
     };
 
-    // ========================================================================
-    // Sign Up form
-    // ========================================================================
-    const signUpForm = useForm<SignUpValues>({
-        resolver: zodResolver(signUpSchema),
-        defaultValues: { firstName: '', lastName: '', email: '', password: '', confirmPassword: '' },
-    });
-
     const onSignUp = async (values: SignUpValues) => {
         if (!captchaToken) {
             setFormError('Please complete the captcha verification.');
@@ -162,7 +157,8 @@ const Auth = () => {
         setFormError(null);
 
         try {
-            const result = await signUp.email({
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const result = await (signUp.email as any)({
                 email: values.email,
                 password: values.password,
                 name: `${values.firstName} ${values.lastName}`,

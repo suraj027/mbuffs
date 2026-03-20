@@ -29,12 +29,17 @@ export const useAuth = () => {
         recommendationsCollectionId: (session.user as { recommendationsCollectionId?: string }).recommendationsCollectionId,
     } : null;
 
+    const handleSignIn = () => {
+        window.location.href = '/login';
+    };
+
     return {
         user,
         isLoggedIn: !!session?.user,
         isLoadingUser: isLoading,
         isUserError: !!error,
         userError: error,
+        signIn: handleSignIn,
         logout: handleSignOut,
         isLoggingOut: false, // Better Auth handles this internally
         session,
