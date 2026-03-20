@@ -1,16 +1,7 @@
-import { authClient, useSession, signIn, signOut } from '../lib/auth-client';
-
-const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+import { useSession, signOut } from '../lib/auth-client';
 
 export const useAuth = () => {
     const { data: session, isPending: isLoading, error } = useSession();
-
-    const handleSignIn = async () => {
-        await signIn.social({
-            provider: "google",
-            callbackURL: window.location.origin,
-        });
-    };
 
     const handleSignOut = async () => {
         await signOut({
@@ -30,9 +21,10 @@ export const useAuth = () => {
         username: (session.user as { username?: string }).username || session.user.name,
         avatarUrl: session.user.image,
         name: session.user.name,
+        firstName: (session.user as { firstName?: string }).firstName,
+        lastName: (session.user as { lastName?: string }).lastName,
         image: session.user.image,
         createdAt: session.user.createdAt,
-        // Custom fields - these will be fetched from /api/user/preferences endpoint
         recommendationsEnabled: (session.user as { recommendationsEnabled?: boolean }).recommendationsEnabled,
         recommendationsCollectionId: (session.user as { recommendationsCollectionId?: string }).recommendationsCollectionId,
     } : null;
@@ -44,7 +36,6 @@ export const useAuth = () => {
         isUserError: !!error,
         userError: error,
         logout: handleSignOut,
-        signIn: handleSignIn,
         isLoggingOut: false, // Better Auth handles this internally
         session,
     };

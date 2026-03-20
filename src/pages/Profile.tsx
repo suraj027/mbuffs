@@ -1,5 +1,6 @@
+import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchUserCollectionsApi, updateUserPreferencesApi, fetchRecommendationCollectionsApi, setRecommendationCollectionsApi, fetchUserPreferencesApi, fetchWatchedItemsApi, fetchNotInterestedItemsApi } from '@/lib/api';
+import { fetchUserCollectionsApi, updateUserPreferencesApi, fetchRecommendationCollectionsApi, setRecommendationCollectionsApi, fetchUserPreferencesApi, fetchWatchedItemsApi, fetchNotInterestedItemsApi, uploadAvatarApi, removeAvatarApi, fetchCurrentUserApi } from '@/lib/api';
 import { UserCollectionsResponse, UpdateUserPreferencesInput, RecommendationCollectionsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -13,12 +14,55 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database } from 'lucide-react';
+import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2 } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
 
+// ============================================================================
+// Image helpers
+// ============================================================================
+const MAX_IMAGE_SIZE = 512; // max width/height in px
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+function resizeImageToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let { width, height } = img;
+
+                // Scale down to fit within MAX_IMAGE_SIZE
+                if (width > MAX_IMAGE_SIZE || height > MAX_IMAGE_SIZE) {
+                    if (width > height) {
+                        height = Math.round((height * MAX_IMAGE_SIZE) / width);
+                        width = MAX_IMAGE_SIZE;
+                    } else {
+                        width = Math.round((width * MAX_IMAGE_SIZE) / height);
+                        height = MAX_IMAGE_SIZE;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return reject(new Error('Canvas not supported'));
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/webp', 0.8));
+            };
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = reader.result as string;
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
 const COLLECTIONS_QUERY_KEY = ['collections', 'user'];
 const USER_QUERY_KEY = ['user'];
+const USER_ME_QUERY_KEY = ['user', 'me'];
 const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
 const PREFERENCES_QUERY_KEY = ['user', 'preferences'];
 const WATCHED_ITEMS_QUERY_KEY = ['collections', 'watched', 'items'];
@@ -27,6 +71,18 @@ const NOT_INTERESTED_ITEMS_QUERY_KEY = ['collections', 'not-interested', 'items'
 const Profile = () => {
     const queryClient = useQueryClient();
     const { user, isLoadingUser } = useAuth();
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+    // Fetch full user data from /me (includes avatarUrl for custom uploads)
+    const { data: meData } = useQuery({
+        queryKey: USER_ME_QUERY_KEY,
+        queryFn: fetchCurrentUserApi,
+        enabled: !!user,
+    });
+
+    // Resolved avatar: custom upload > Google/OAuth image from DB > session image > null
+    const resolvedAvatarUrl = meData?.user?.avatarUrl || meData?.user?.image || user?.avatarUrl || user?.image || undefined;
 
     // Fetch user preferences separately (not from session)
     const {
@@ -194,6 +250,53 @@ const Profile = () => {
         return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
     };
 
+    const handleAvatarClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        // Reset file input so the same file can be re-selected
+        e.target.value = '';
+
+        if (!ACCEPTED_TYPES.includes(file.type)) {
+            toast.error('Please select a JPEG, PNG, WebP, or GIF image.');
+            return;
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+            toast.error('Image must be under 5 MB.');
+            return;
+        }
+
+        setIsUploadingAvatar(true);
+        try {
+            const dataUrl = await resizeImageToDataUrl(file);
+            await uploadAvatarApi(dataUrl);
+            toast.success('Profile picture updated!');
+            queryClient.invalidateQueries({ queryKey: USER_ME_QUERY_KEY });
+        } catch {
+            toast.error('Failed to update profile picture.');
+        } finally {
+            setIsUploadingAvatar(false);
+        }
+    };
+
+    const handleRemoveAvatar = async () => {
+        setIsUploadingAvatar(true);
+        try {
+            await removeAvatarApi();
+            toast.success('Profile picture removed.');
+            queryClient.invalidateQueries({ queryKey: USER_ME_QUERY_KEY });
+        } catch {
+            toast.error('Failed to remove profile picture.');
+        } finally {
+            setIsUploadingAvatar(false);
+        }
+    };
+
     if (isLoadingUser) {
         return (
             <>
@@ -239,15 +342,57 @@ const Profile = () => {
                 <Card className="mb-6">
                     <CardContent>
                         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                            <Avatar className="h-20 w-20 shrink-0">
-                                <AvatarImage
-                                    src={user.avatarUrl || user.image || undefined}
-                                    alt={user.username || user.name || 'User'}
+                            {/* Editable avatar */}
+                            <div className="relative group shrink-0">
+                                <Avatar className="h-20 w-20">
+                                    <AvatarImage
+                                        src={resolvedAvatarUrl}
+                                        alt={user.username || user.name || 'User'}
+                                        referrerPolicy="no-referrer"
+                                    />
+                                    <AvatarFallback className="text-lg">
+                                        {getInitials(user.username)}
+                                    </AvatarFallback>
+                                </Avatar>
+
+                                {/* Upload overlay */}
+                                <button
+                                    type="button"
+                                    onClick={handleAvatarClick}
+                                    disabled={isUploadingAvatar}
+                                    className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:cursor-wait"
+                                    aria-label="Change profile picture"
+                                >
+                                    {isUploadingAvatar ? (
+                                        <Loader2 className="h-5 w-5 text-white animate-spin" />
+                                    ) : (
+                                        <Camera className="h-5 w-5 text-white" />
+                                    )}
+                                </button>
+
+                                {/* Hidden file input */}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,image/gif"
+                                    className="hidden"
+                                    onChange={handleFileChange}
                                 />
-                                <AvatarFallback className="text-lg">
-                                    {getInitials(user.username)}
-                                </AvatarFallback>
-                            </Avatar>
+
+                                {/* Remove button (only when there's a custom uploaded avatar) */}
+                                {meData?.user?.avatarUrl && (
+                                    <button
+                                        type="button"
+                                        onClick={handleRemoveAvatar}
+                                        disabled={isUploadingAvatar}
+                                        className="absolute -bottom-1 -right-1 rounded-full bg-destructive p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:cursor-wait"
+                                        aria-label="Remove profile picture"
+                                    >
+                                        <Trash2 className="h-3 w-3 text-white" />
+                                    </button>
+                                )}
+                            </div>
+
                             <div className="flex-1 min-w-0 space-y-1 text-center sm:text-left w-full">
                                 <h2 className="text-2xl font-semibold">
                                     {user.username || 'User'}

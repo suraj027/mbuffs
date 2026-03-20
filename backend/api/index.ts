@@ -23,7 +23,7 @@ const port = process.env.PORT || 5001;
 const corsOptions = {
     origin: process.env.FRONTEND_URL || 'http://localhost:8080',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-captcha-response'],
     credentials: true, // Required for Better Auth cookies
 };
 
@@ -40,8 +40,8 @@ app.use(cookieParser());
 // Better Auth handles its own body parsing
 app.use('/api/auth', oauthRoutes);
 
-// Apply JSON middleware for other routes
-app.use(express.json());
+// Apply JSON middleware for other routes (2mb limit for avatar uploads)
+app.use(express.json({ limit: '2mb' }));
 
 // Attach userId info from session to req if available
 app.use(deserializeUser);

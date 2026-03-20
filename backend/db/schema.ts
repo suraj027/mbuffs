@@ -14,6 +14,9 @@ export const user = pgTable("user", {
 	email: text().notNull(),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text(), // Better Auth field (profile picture)
+	// Name fields
+	firstName: text("first_name"),
+	lastName: text("last_name"),
 	// Legacy fields - keep for backward compatibility
 	username: text(),
 	avatarUrl: text("avatar_url"),

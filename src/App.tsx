@@ -22,6 +22,7 @@ const ForYou = lazy(() => import('./pages/ForYou'));
 const WatchedItems = lazy(() => import('./pages/WatchedItems'));
 const NotInterestedItems = lazy(() => import('./pages/NotInterestedItems'));
 const RecommendationCacheDebug = lazy(() => import('./pages/RecommendationCacheDebug'));
+const Auth = lazy(() => import('./pages/Auth'));
 
 // Scrolls to top on every navigation (except browser back/forward)
 const ScrollToTop = () => {
@@ -68,6 +69,7 @@ const App = () => (
             <Route path="/tv/:mediaId/season/:seasonNumber" element={<SeasonDetail />} />
             <Route path="/person/:personId" element={<PersonDetail />} />
             <Route path="/collection/:collectionId" element={<CollectionDetail />} />
+            <Route path="/login" element={<Auth />} />
 
             {/* Protected Routes */}
             <Route
@@ -160,8 +162,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!isLoggedIn) {
-    // Redirect them to the home page if not logged in.
-    return <Navigate to="/" replace state={{ from: location }} />;
+    // Redirect them to the login page if not logged in.
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   return children;

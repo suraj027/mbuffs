@@ -15,6 +15,13 @@
       "when": 1771774894184,
       "tag": "0001_add_is_system_to_collections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774012928705,
+      "tag": "0002_mute_namora",
+      "breakpoints": true
     }
   ]
 }

@@ -107,6 +107,20 @@ export const updateUserPreferencesApi = async (data: UpdateUserPreferencesInput)
     });
 };
 
+// --- Avatar API Functions ---
+export const uploadAvatarApi = async (dataUrl: string): Promise<{ image: string }> => {
+    return fetchBackend('/user/avatar', {
+        method: 'POST',
+        body: JSON.stringify({ dataUrl }),
+    });
+};
+
+export const removeAvatarApi = async (): Promise<{ message: string }> => {
+    return fetchBackend('/user/avatar', {
+        method: 'DELETE',
+    });
+};
+
 // --- Recommendation API Functions ---
 
 export const fetchRecommendationsApi = async (limit: number = 20, page: number = 1): Promise<RecommendationsResponse> => {

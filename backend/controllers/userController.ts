@@ -5,6 +5,9 @@ import { invalidateRecommendationCache } from '../services/recommendationService
 // Import to ensure Express Request extension is applied
 import '../middleware/authMiddleware.js';
 
+// Max base64 payload size (~2 MB of base64 ≈ ~1.5 MB image)
+const MAX_AVATAR_BASE64_LENGTH = 2 * 1024 * 1024;
+
 export const getUserPreferences = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userId) {
         return res.status(401).json({ message: "Unauthorized" });
@@ -115,6 +118,107 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         res.status(200).json({ preferences });
     } catch (error) {
         console.error("Error updating user preferences:", error);
+        next(error);
+    }
+};
+
+// ============================================================================
+// Avatar upload — stores base64 data in avatar_url, sets image to serving URL
+// ============================================================================
+export const uploadAvatar = async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+        const { dataUrl } = req.body as { dataUrl?: string };
+
+        if (!dataUrl || typeof dataUrl !== 'string') {
+            return res.status(400).json({ message: "Missing dataUrl in request body" });
+        }
+
+        if (!dataUrl.startsWith('data:image/')) {
+            return res.status(400).json({ message: "Invalid image data URL" });
+        }
+
+        if (dataUrl.length > MAX_AVATAR_BASE64_LENGTH) {
+            return res.status(400).json({ message: "Image is too large. Please use a smaller image." });
+        }
+
+        // Only store in avatar_url — leave image (Google profile pic) untouched
+        await sql`
+            UPDATE "user"
+            SET avatar_url = ${dataUrl},
+                updated_at = NOW()
+            WHERE id = ${req.userId}
+        `;
+
+        const backendUrl = process.env.BETTER_AUTH_URL || 'http://localhost:5001';
+        const servingUrl = `${backendUrl}/api/user/avatar/${req.userId}`;
+        res.status(200).json({ avatarUrl: servingUrl });
+    } catch (error) {
+        console.error("Error uploading avatar:", error);
+        next(error);
+    }
+};
+
+// ============================================================================
+// Serve avatar image — decodes base64 from avatar_url and returns raw image
+// ============================================================================
+export const getAvatar = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await sql`
+            SELECT avatar_url FROM "user" WHERE id = ${userId}
+        `;
+
+        if (result.length === 0 || !result[0].avatar_url) {
+            return res.status(404).json({ message: "No avatar found" });
+        }
+
+        const dataUrl: string = result[0].avatar_url;
+
+        // Parse data URL: data:image/webp;base64,AAAA...
+        const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (!match) {
+            return res.status(404).json({ message: "Invalid avatar data" });
+        }
+
+        const contentType = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+
+        // Cache for 1 hour, allow CDN caching
+        res.set('Content-Type', contentType);
+        res.set('Cache-Control', 'public, max-age=3600');
+        res.set('Content-Length', buffer.length.toString());
+        res.send(buffer);
+    } catch (error) {
+        console.error("Error serving avatar:", error);
+        next(error);
+    }
+};
+
+// ============================================================================
+// Remove avatar — clears both avatar_url and image fields
+// ============================================================================
+export const removeAvatar = async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+        // Only clear avatar_url — leave image (Google profile pic) untouched
+        await sql`
+            UPDATE "user"
+            SET avatar_url = NULL,
+                updated_at = NOW()
+            WHERE id = ${req.userId}
+        `;
+
+        res.status(200).json({ message: "Avatar removed" });
+    } catch (error) {
+        console.error("Error removing avatar:", error);
         next(error);
     }
 };

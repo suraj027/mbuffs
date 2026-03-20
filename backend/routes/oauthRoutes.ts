@@ -1,7 +1,7 @@
 import express, { RequestHandler, Request, Response, NextFunction } from 'express';
 import { toNodeHandler } from "better-auth/node";
 import { auth } from '../lib/auth.js';
-import { requireAuth } from '../middleware/authMiddleware.js';
+import { deserializeUser, requireAuth } from '../middleware/authMiddleware.js';
 import { sql } from '../lib/db.js';
 
 const router = express.Router();
@@ -16,11 +16,18 @@ const getCurrentUser: RequestHandler = async (req: Request, res: Response, next:
 
     try {
         // Fetch user details including custom fields
+        const backendUrl = process.env.BETTER_AUTH_URL || 'http://localhost:5001';
         const result = await sql`
-            SELECT id, email, name, image, 
-                   recommendations_enabled as "recommendationsEnabled", 
+            SELECT id, email, name, image,
+                   CASE WHEN avatar_url IS NOT NULL
+                        THEN ${backendUrl} || '/api/user/avatar/' || id
+                        ELSE NULL
+                   END as "avatarUrl",
+                   first_name as "firstName",
+                   last_name as "lastName",
+                   recommendations_enabled as "recommendationsEnabled",
                    recommendations_collection_id as "recommendationsCollectionId"
-            FROM "user" 
+            FROM "user"
             WHERE id = ${req.userId}
         `;
         
@@ -38,7 +45,7 @@ const getCurrentUser: RequestHandler = async (req: Request, res: Response, next:
     }
 };
 
-router.get('/me', requireAuth as RequestHandler, getCurrentUser);
+router.get('/me', deserializeUser as RequestHandler, requireAuth as RequestHandler, getCurrentUser);
 
 // Better Auth handles all other auth routes at /api/auth/*
 // This includes: /sign-in/social, /callback/google, /sign-out, /session, etc.
