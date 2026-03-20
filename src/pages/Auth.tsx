@@ -63,6 +63,7 @@ const Auth = () => {
     const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
     const [activeTab, setActiveTab] = useState<string>('sign-in');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
     const [captchaToken, setCaptchaToken] = useState<string | null>(null);
     const turnstileRef = useRef<TurnstileInstance | null>(null);
@@ -191,11 +192,26 @@ const Auth = () => {
     // Google OAuth
     // ========================================================================
     const handleGoogleSignIn = async () => {
+        if (isGoogleSigningIn) return;
+
+        setFormError(null);
+        setIsGoogleSigningIn(true);
         saveLastAuthMethod('google');
-        await signIn.social({
-            provider: 'google',
-            callbackURL: window.location.origin,
-        });
+
+        try {
+            const result = await signIn.social({
+                provider: 'google',
+                callbackURL: window.location.origin,
+            });
+
+            if (result.error) {
+                setFormError(result.error.message || 'Could not connect to Google. Please try again.');
+                setIsGoogleSigningIn(false);
+            }
+        } catch {
+            setFormError('Could not connect to Google. Please try again.');
+            setIsGoogleSigningIn(false);
+        }
     };
 
     // ========================================================================
@@ -216,9 +232,14 @@ const Auth = () => {
                                 variant="outline"
                                 className="w-full h-12 justify-center text-base relative"
                                 onClick={handleGoogleSignIn}
+                                disabled={isGoogleSigningIn}
                             >
-                                <GoogleIcon />
-                                Continue with Google
+                                {isGoogleSigningIn ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <GoogleIcon />
+                                )}
+                                {isGoogleSigningIn ? 'Continuing with Google...' : 'Continue with Google'}
                                 {lastUsedMethod === 'google' && (
                                     <Badge variant="secondary" className="absolute right-3 text-[10px] px-1.5 py-0">
                                         Last used
@@ -239,6 +260,10 @@ const Auth = () => {
                                     </Badge>
                                 )}
                             </Button>
+
+                            {formError && (
+                                <p className="text-sm text-destructive text-center">{formError}</p>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
@@ -344,9 +369,13 @@ const Auth = () => {
                                     </div>
                                 </div>
 
-                                <Button variant="outline" className="w-full" onClick={handleGoogleSignIn}>
-                                    <GoogleIcon />
-                                    Google
+                                <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isGoogleSigningIn}>
+                                    {isGoogleSigningIn ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <GoogleIcon />
+                                    )}
+                                    {isGoogleSigningIn ? 'Connecting to Google...' : 'Google'}
                                 </Button>
                             </TabsContent>
 
@@ -460,9 +489,13 @@ const Auth = () => {
                                     </div>
                                 </div>
 
-                                <Button variant="outline" className="w-full" onClick={handleGoogleSignIn}>
-                                    <GoogleIcon />
-                                    Google
+                                <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isGoogleSigningIn}>
+                                    {isGoogleSigningIn ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <GoogleIcon />
+                                    )}
+                                    {isGoogleSigningIn ? 'Connecting to Google...' : 'Google'}
                                 </Button>
                             </TabsContent>
                         </Tabs>
