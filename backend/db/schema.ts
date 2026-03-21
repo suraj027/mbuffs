@@ -21,6 +21,7 @@ export const user = pgTable("user", {
 	username: text(),
 	avatarUrl: text("avatar_url"),
 	hashedPassword: text("hashed_password"),
+	role: text().default('user').notNull(),
 	// Timestamps
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),

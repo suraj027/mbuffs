@@ -19,6 +19,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "backend" // Added backend directory to exclude
+    "backend", // Added backend directory to exclude
+    ".pi"
   ]
 }

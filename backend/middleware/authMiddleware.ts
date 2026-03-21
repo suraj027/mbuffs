@@ -74,3 +74,15 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
 
     next();
 };
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: "Unauthorized: Authentication required" });
+    }
+
+    if (!req.user || (req.user as any).role !== 'admin') {
+        return res.status(403).json({ message: "Forbidden: Admin access required" });
+    }
+
+    next();
+};

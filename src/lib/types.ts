@@ -222,6 +222,21 @@ export interface User {
   // Custom fields
   recommendationsEnabled?: boolean;
   recommendationsCollectionId?: string | null;
+  role?: string;
+}
+
+export interface AdminUser extends User {
+  firstName?: string | null;
+  lastName?: string | null;
+  role: string;
+  providers: string[];
+  categoryRecommendationsEnabled?: boolean;
+  collectionCount: number;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+  total: number;
 }
 
 // --- User Preferences Types ---

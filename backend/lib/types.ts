@@ -4,10 +4,31 @@ export interface DatabaseUserAttributes {
     username: string | null;
     email: string | null;
     avatar_url: string | null;
+    role: string;
     created_at: Date;
     updated_at: Date;
     recommendations_enabled: boolean;
     recommendations_collection_id: string | null;
+}
+
+export interface AdminUserResponse {
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    image: string | null;
+    username: string | null;
+    avatarUrl: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    role: string;
+    createdAt: string;
+    updatedAt: string;
+    providers: string[];
+    recommendationsEnabled: boolean;
+    recommendationsCollectionId: string | null;
+    categoryRecommendationsEnabled: boolean;
+    collectionCount: number;
 }
 
 // --- User Preferences Types ---

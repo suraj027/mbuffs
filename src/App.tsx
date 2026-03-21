@@ -23,6 +23,7 @@ const WatchedItems = lazy(() => import('./pages/WatchedItems'));
 const NotInterestedItems = lazy(() => import('./pages/NotInterestedItems'));
 const RecommendationCacheDebug = lazy(() => import('./pages/RecommendationCacheDebug'));
 const Auth = lazy(() => import('./pages/Auth'));
+const Admin = lazy(() => import('./pages/Admin'));
 
 // Scrolls to top on every navigation (except browser back/forward)
 const ScrollToTop = () => {
@@ -97,6 +98,14 @@ const App = () => (
               }
             />
             <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <Admin />
+                </AdminRoute>
+              }
+            />
+            <Route
               path="/watched"
               element={
                 <ProtectedRoute>
@@ -164,6 +173,29 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   if (!isLoggedIn) {
     // Redirect them to the login page if not logged in.
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  return children;
+};
+
+const AdminRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isLoggedIn, isLoadingUser, user } = useAuth();
+  const location = useLocation();
+
+  if (isLoadingUser) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <Loader2 className="h-16 w-16 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (!user?.role || user.role !== 'admin') {
+    return <Navigate to="/" replace />;
   }
 
   return children;

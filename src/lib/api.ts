@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
 import {
-    Movie, MovieDetails, SearchResults, User,
+    Movie, MovieDetails, SearchResults, User, AdminUsersResponse,
     CollectionSummary, CollectionDetails, CollectionCollaborator, UserCollectionsResponse,
     CreateCollectionInput, UpdateCollectionInput, AddMovieInput, AddCollaboratorInput,
     UpdateCollaboratorInput, AddMovieResponse, VideosResponse, CreditsResponse,
@@ -85,6 +85,10 @@ export const fetchBackend = async (endpoint: string, options: RequestInit = {}) 
 // --- Auth API Functions ---
 export const fetchCurrentUserApi = async (): Promise<{ user: User }> => {
     return fetchBackend('/auth/me');
+};
+
+export const fetchAdminUsersApi = async (): Promise<AdminUsersResponse> => {
+    return fetchBackend('/admin/users');
 };
 
 export const logoutUserApi = async (): Promise<void> => {
