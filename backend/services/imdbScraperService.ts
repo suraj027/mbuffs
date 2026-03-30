@@ -293,13 +293,19 @@ export async function scrapeParentalGuidanceFromImdb(imdbId: string): Promise<Om
             }
         }
 
-        console.log(`Scraped parental guidance for ${imdbId} (fallback methods):`, {
-            nudity: result.nudity,
-            violence: result.violence,
-            profanity: result.profanity,
-            alcohol: result.alcohol,
-            frightening: result.frightening
-        });
+        const hasFallbackData = result.nudity || result.violence || result.profanity || result.alcohol || result.frightening;
+
+        if (!hasFallbackData) {
+            console.warn(`Could not scrape parental guidance for ${imdbId}: no category severities found on IMDB page`);
+        } else {
+            console.log(`Scraped parental guidance for ${imdbId} (fallback methods):`, {
+                nudity: result.nudity,
+                violence: result.violence,
+                profanity: result.profanity,
+                alcohol: result.alcohol,
+                frightening: result.frightening
+            });
+        }
 
         return result;
     } catch (error) {
@@ -586,9 +592,14 @@ export async function scrapeAndSaveParentalGuidance(
     const scrapedData = await scrapeParentalGuidanceFromImdb(imdbId);
     
     if (!scrapedData) {
-        console.log(`Failed to scrape parental guidance for ${imdbId}`);
+        console.warn(`Failed to scrape parental guidance for ${mediaType} ${tmdbId} (IMDB ${imdbId})`);
         // Return existing data if scrape fails, better than nothing
         return existing;
+    }
+
+    const scrapedCount = countFilledCategories(scrapedData);
+    if (scrapedCount === 0) {
+        console.warn(`Scrape returned no parental guidance categories for ${mediaType} ${tmdbId} (IMDB ${imdbId})`);
     }
     
     // Merge scraped data with existing data

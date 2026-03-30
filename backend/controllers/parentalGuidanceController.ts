@@ -43,6 +43,7 @@ export const getParentalGuidance = async (req: Request, res: Response, next: Nex
         data = await scrapeAndSaveParentalGuidance(tmdbId, mediaType as 'movie' | 'tv');
 
         if (!data) {
+            console.warn(`Could not scrape parental guidance for ${mediaType} ${tmdbId}`);
             res.status(404).json({ 
                 error: 'Parental guidance data not available for this title',
                 message: 'Could not find IMDB data for this title'
@@ -351,6 +352,8 @@ async function fetchParentalGuidanceInternal(
                 frightening: data.frightening
             };
         }
+
+        console.warn(`Could not scrape parental guidance for ${mediaType} ${tmdbId} in combined ratings flow`);
 
         return null;
     } catch (error) {
