@@ -20,6 +20,7 @@ REDDIT_POSTS_PER_SUB=25            # Posts to fetch per subreddit (default: 25)
 REDDIT_MIN_SCORE=10                # Minimum upvote score (default: 10)
 REDDIT_TIMEFRAME=week              # hour|day|week|month|year|all (default: week)
 REDDIT_CACHE_TTL_HOURS=168         # Cache validity in hours (default: 168 = 1 week)
+REDDIT_SCRAPE_IN_CI=true           # Opt-in: allow scraping when CI=true (default: skip in CI)
 ```
 
 ### Commands
@@ -71,6 +72,8 @@ The scraper runs automatically during `npm run build`:
 npm run build          # Runs migrations + TypeScript + Reddit scrape
 npm run build:no-scrape  # Runs migrations + TypeScript only (faster for dev)
 ```
+
+By default, the scraper exits early when running in CI (`CI`, `VERCEL`, `GITHUB_ACTIONS`, or `GITLAB_CI`), so builds stay fast and avoid Reddit datacenter IP blocks. Set `REDDIT_SCRAPE_IN_CI=true` to opt in.
 
 ### Output
 

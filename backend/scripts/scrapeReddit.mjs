@@ -705,6 +705,7 @@ async function isCacheValid() {
 
 // Detect CI environment
 const IS_CI = !!(process.env.CI || process.env.VERCEL || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI);
+const REDDIT_SCRAPE_IN_CI = process.env.REDDIT_SCRAPE_IN_CI === 'true';
 
 async function main() {
     console.log('=== Reddit Recommendations Scraper ===\n');
@@ -717,6 +718,13 @@ async function main() {
     console.log(`  Force scrape: ${FORCE_SCRAPE}`);
     console.log(`  CI environment: ${IS_CI ? 'Yes' : 'No'}`);
     console.log('');
+
+    if (IS_CI && !REDDIT_SCRAPE_IN_CI) {
+        console.log('=== Skipping Scrape (CI Environment) ===');
+        console.log('  Reddit scrape is disabled in CI to keep builds fast and stable.');
+        console.log('  Set REDDIT_SCRAPE_IN_CI=true to enable scraping in CI.');
+        return;
+    }
 
     // Check cache unless --force is used
     if (!FORCE_SCRAPE) {
