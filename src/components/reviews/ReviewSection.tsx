@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     createCommentApi,
@@ -10,7 +10,6 @@ import {
 } from '@/lib/api';
 import type { ReviewComment } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -20,7 +19,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Star, Pencil, Trash2, Loader2, MessageSquare, MoreHorizontal } from 'lucide-react';
+import { Star, Pencil, Trash2, Loader2, MessageSquare, MoreHorizontal, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
@@ -43,7 +42,7 @@ function starFillFraction(filledStars: number, index: number): number {
     return Math.min(Math.max(filledStars - index, 0), 1);
 }
 
-const STAR_SIZE = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-8 w-8' } as const;
+const STAR_SIZE = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-6 w-6' } as const;
 
 /** Read-only fractional star display, maps a 1–10 rating to 5 visual stars. */
 function StarDisplay({ rating, max = 10, size = 'sm', className }: { rating: number; max?: number; size?: 'sm' | 'md' | 'lg'; className?: string }) {
@@ -78,68 +77,73 @@ function InteractiveStarRating({
     value,
     onChange,
     disabled,
+    starSize = 'h-7 w-7',
 }: {
     value: number | null;
     onChange: (rating: number) => void;
     disabled?: boolean;
+    starSize?: string;
 }) {
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const activeRating = hoverRating ?? value ?? 0;
     const filledStars = activeRating / 2;
 
     return (
-        <div
-            className={cn('flex items-center gap-0.5', disabled && 'pointer-events-none opacity-50')}
-            onMouseLeave={() => setHoverRating(null)}
-        >
-            {Array.from({ length: 5 }, (_, i) => {
-                const leftRating = i * 2 + 1;
-                const rightRating = i * 2 + 2;
-                const fill = starFillFraction(filledStars, i);
+        <div className={cn('flex flex-col items-center gap-1.5', disabled && 'pointer-events-none opacity-50')}>
+            <div
+                className="flex items-center gap-1"
+                onMouseLeave={() => setHoverRating(null)}
+            >
+                {Array.from({ length: 5 }, (_, i) => {
+                    const leftRating = i * 2 + 1;
+                    const rightRating = i * 2 + 2;
+                    const fill = starFillFraction(filledStars, i);
 
-                return (
-                    <div key={i} className="relative h-8 w-8 cursor-pointer group/star">
-                        <Star className="absolute inset-0 h-8 w-8 text-muted-foreground/20 transition-colors group-hover/star:text-muted-foreground/30" />
-                        <div
-                            className="absolute inset-0 overflow-hidden transition-all duration-100"
-                            style={{ width: `${fill * 100}%` }}
-                        >
-                            <Star
-                                className={cn(
-                                    'h-8 w-8 transition-colors duration-100',
-                                    hoverRating !== null
-                                        ? 'fill-amber-300 text-amber-300'
-                                        : 'fill-amber-400 text-amber-400'
-                                )}
+                    return (
+                        <div key={i} className={cn('relative cursor-pointer group/star', starSize)}>
+                            <Star className={cn('absolute inset-0 text-muted-foreground/20 transition-colors group-hover/star:text-muted-foreground/30', starSize)} />
+                            <div
+                                className="absolute inset-0 overflow-hidden transition-all duration-100"
+                                style={{ width: `${fill * 100}%` }}
+                            >
+                                <Star
+                                    className={cn(
+                                        starSize,
+                                        'transition-colors duration-100',
+                                        hoverRating !== null
+                                            ? 'fill-amber-300 text-amber-300'
+                                            : 'fill-amber-400 text-amber-400'
+                                    )}
+                                />
+                            </div>
+                            {/* Invisible left/right hit areas for half-star precision */}
+                            <div
+                                className="absolute inset-y-0 left-0 w-1/2 z-10"
+                                onMouseEnter={() => setHoverRating(leftRating)}
+                                onClick={() => onChange(leftRating)}
+                            />
+                            <div
+                                className="absolute inset-y-0 right-0 w-1/2 z-10"
+                                onMouseEnter={() => setHoverRating(rightRating)}
+                                onClick={() => onChange(rightRating)}
                             />
                         </div>
-                        {/* Invisible left/right hit areas for half-star precision */}
-                        <div
-                            className="absolute inset-y-0 left-0 w-1/2 z-10"
-                            onMouseEnter={() => setHoverRating(leftRating)}
-                            onClick={() => onChange(leftRating)}
-                        />
-                        <div
-                            className="absolute inset-y-0 right-0 w-1/2 z-10"
-                            onMouseEnter={() => setHoverRating(rightRating)}
-                            onClick={() => onChange(rightRating)}
-                        />
-                    </div>
-                );
-            })}
+                    );
+                })}
+            </div>
 
-            {/* Numeric readout */}
+            {/* Numeric readout — below stars so they stay centered */}
             <span
                 className={cn(
-                    'ml-2 text-sm font-semibold tabular-nums transition-all duration-150 min-w-[2.5rem]',
+                    'text-sm font-semibold tabular-nums transition-all duration-150 h-5',
                     activeRating > 0
                         ? hoverRating !== null
                             ? 'text-amber-400'
                             : 'text-foreground/70'
-                        : 'text-transparent select-none'
+                        : 'text-muted-foreground/30'
                 )}
             >
-                {activeRating > 0 ? `${activeRating}/10` : '—/10'}
+                {activeRating > 0 ? `${activeRating}/10` : '\u00A0'}
             </span>
         </div>
     );
@@ -169,6 +173,8 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
     const queryClient = useQueryClient();
     const [draftComment, setDraftComment] = useState('');
     const [editingState, setEditingState] = useState<{ commentId: string; draft: string } | null>(null);
+    const [isComposerFocused, setIsComposerFocused] = useState(false);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     /* ── Queries ─────────────────────────────────────────────────────────── */
 
@@ -220,6 +226,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
         mutationFn: (comment: string) => createCommentApi(mediaType, tmdbId, comment),
         onSuccess: async () => {
             setDraftComment('');
+            setIsComposerFocused(false);
             await refreshReviews();
             toast.success('Comment posted');
         },
@@ -260,12 +267,20 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
         updateCommentMutation.mutate({ commentId, comment: trimmed });
     };
 
+    const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            handleSubmitComment();
+        }
+    };
+
     const canModerate = user?.role === 'admin';
+    const showComposerActions = isComposerFocused || draftComment.length > 0;
 
     /* ── Render ──────────────────────────────────────────────────────────── */
 
     return (
-        <section className="space-y-6">
+        <section className="space-y-5">
             {/* ────────── Section heading ────────── */}
             <div className="flex items-baseline gap-3">
                 <h2 className="text-xl md:text-2xl font-semibold text-foreground/90">
@@ -279,162 +294,195 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                 )}
             </div>
 
-            {/* ────────── Rating overview — community + user, side-by-side ────────── */}
-            <div className="rounded-xl bg-card/50 border border-border/60 overflow-hidden">
-                <div className="flex flex-col md:flex-row">
-                    {/* Community rating */}
-                    <div className="flex-1 p-5 md:p-6 flex flex-col items-center md:items-start gap-2">
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                            Community Rating
+            {/* ────────── Ratings card — vertically stacked ────────── */}
+            <div className="rounded-xl border border-border/60 overflow-hidden bg-card/40">
+                {/* ── mbuff score (hero) ── */}
+                <div className="px-5 pt-5 pb-4 md:px-6 md:pt-6 flex flex-col items-center text-center gap-1.5">
+                    <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-[0.15em]">
+                        mbuff score
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-5xl md:text-6xl font-extrabold tabular-nums tracking-tighter leading-none">
+                            {summaryData?.summary.averageRating ?? '—'}
                         </span>
-                        <div className="flex items-end gap-1.5">
-                            <span className="text-4xl md:text-5xl font-bold tabular-nums tracking-tighter leading-none">
-                                {summaryData?.summary.averageRating ?? '—'}
-                            </span>
-                            <span className="text-sm text-muted-foreground/50 font-medium mb-1">
-                                /10
-                            </span>
-                        </div>
-                        {summaryData?.summary.averageRating != null ? (
-                            <StarDisplay rating={summaryData.summary.averageRating} size="md" />
-                        ) : (
-                            <StarDisplay rating={0} size="md" />
-                        )}
-                        <span className="text-xs text-muted-foreground mt-0.5">
-                            Based on {summaryData?.summary.ratingsCount ?? 0}{' '}
-                            {(summaryData?.summary.ratingsCount ?? 0) === 1 ? 'rating' : 'ratings'}
+                        <span className="text-base text-muted-foreground/40 font-semibold">
+                            /10
                         </span>
                     </div>
+                    {summaryData?.summary.averageRating != null ? (
+                        <StarDisplay rating={summaryData.summary.averageRating} size="md" />
+                    ) : (
+                        <StarDisplay rating={0} size="md" />
+                    )}
+                    <span className="text-xs text-muted-foreground/60">
+                        {summaryData?.summary.ratingsCount ?? 0}{' '}
+                        {(summaryData?.summary.ratingsCount ?? 0) === 1 ? 'rating' : 'ratings'}
+                    </span>
+                </div>
 
-                    {/* Divider */}
-                    <Separator className="md:hidden" />
-                    <Separator orientation="vertical" className="hidden md:block h-auto" />
+                {/* ── Divider ── */}
+                <div className="mx-5 md:mx-6">
+                    <Separator className="opacity-40" />
+                </div>
 
-                    {/* User rating */}
-                    <div className="flex-1 p-5 md:p-6 flex flex-col items-center md:items-start gap-3">
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                            {isLoggedIn ? 'Your Rating' : 'Rate This'}
-                        </span>
+                {/* ── Your rating (compact) ── */}
+                <div className="px-5 py-3.5 pb-4 md:px-6 flex flex-col items-center text-center gap-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.12em]">
+                        {isLoggedIn ? 'Your Rating' : 'Rate This'}
+                    </span>
 
-                        {isLoggedIn ? (
-                            <>
-                                <InteractiveStarRating
-                                    value={summaryData?.userRating ?? null}
-                                    onChange={(r) => rateMutation.mutate(r)}
-                                    disabled={rateMutation.isPending}
-                                />
-                                {rateMutation.isPending && (
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        Saving...
-                                    </div>
-                                )}
-                                {!summaryData?.userRating && !rateMutation.isPending && (
-                                    <p className="text-xs text-muted-foreground">
-                                        Tap a star to rate
-                                    </p>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <StarDisplay rating={0} size="lg" className="opacity-40" />
-                                <p className="text-sm text-muted-foreground">
-                                    Sign in to rate and review
-                                </p>
-                            </>
-                        )}
-                    </div>
+                    {isLoggedIn ? (
+                        <>
+                            <InteractiveStarRating
+                                value={summaryData?.userRating ?? null}
+                                onChange={(r) => rateMutation.mutate(r)}
+                                disabled={rateMutation.isPending}
+                                starSize="h-6 w-6"
+                            />
+                            {rateMutation.isPending && (
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Saving...
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <StarDisplay rating={0} size="lg" className="opacity-30" />
+                            <p className="text-xs text-muted-foreground">
+                                Sign in to rate and review
+                            </p>
+                        </>
+                    )}
                 </div>
             </div>
 
             {/* ────────── Comment composer ────────── */}
             {isLoggedIn && (
-                <div className="flex gap-3 items-start">
-                    <Avatar className="h-8 w-8 mt-1.5 shrink-0">
-                        <AvatarImage src={user?.avatarUrl || user?.image || undefined} />
-                        <AvatarFallback className="text-xs">
-                            {(user?.name?.[0] || 'U').toUpperCase()}
-                        </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 space-y-2">
-                        <Textarea
-                            placeholder="Share your thoughts..."
-                            value={draftComment}
-                            maxLength={2000}
-                            rows={3}
-                            className="resize-none text-sm bg-card/30 border-border/60 focus:bg-card/50 transition-colors"
-                            onChange={(e) => setDraftComment(e.target.value)}
-                        />
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs tabular-nums text-muted-foreground/40">
-                                {draftComment.length > 0
-                                    ? `${draftComment.length} / 2,000`
-                                    : '\u00A0'}
-                            </span>
-                            <Button
-                                size="sm"
-                                onClick={handleSubmitComment}
-                                disabled={
-                                    createCommentMutation.isPending ||
-                                    draftComment.trim().length === 0
-                                }
-                                className="gap-1.5"
-                            >
-                                {createCommentMutation.isPending ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                    'Post comment'
+                <div
+                    className={cn(
+                        'rounded-xl border bg-card/30 transition-all duration-200',
+                        isComposerFocused
+                            ? 'border-border/80 bg-card/50 ring-1 ring-border/30'
+                            : 'border-border/50'
+                    )}
+                >
+                    <div className="flex items-start gap-3 p-3 md:p-4">
+                        <Avatar className="h-7 w-7 mt-0.5 shrink-0">
+                            <AvatarImage src={user?.avatarUrl || user?.image || undefined} />
+                            <AvatarFallback className="text-[10px]">
+                                {(user?.name?.[0] || 'U').toUpperCase()}
+                            </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                            <textarea
+                                ref={textareaRef}
+                                placeholder="Share your thoughts..."
+                                value={draftComment}
+                                maxLength={2000}
+                                rows={showComposerActions ? 3 : 1}
+                                className={cn(
+                                    'w-full bg-transparent text-sm text-foreground/90 placeholder:text-muted-foreground/40',
+                                    'resize-none outline-none leading-relaxed',
+                                    'transition-all duration-200',
+                                    showComposerActions ? 'min-h-[4.5rem]' : 'min-h-0'
                                 )}
-                            </Button>
+                                onChange={(e) => setDraftComment(e.target.value)}
+                                onFocus={() => setIsComposerFocused(true)}
+                                onBlur={() => {
+                                    if (draftComment.trim().length === 0) {
+                                        setIsComposerFocused(false);
+                                    }
+                                }}
+                                onKeyDown={handleComposerKeyDown}
+                            />
                         </div>
                     </div>
+
+                    {/* Composer footer — char count + post button */}
+                    {showComposerActions && (
+                        <div className="flex items-center justify-between px-3 pb-3 md:px-4 md:pb-4 pt-0">
+                            <span className="text-[11px] tabular-nums text-muted-foreground/30">
+                                {draftComment.length > 0 && `${draftComment.length}/2000`}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground/30 hidden sm:inline">
+                                    {navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+Enter
+                                </span>
+                                <Button
+                                    size="sm"
+                                    onClick={handleSubmitComment}
+                                    disabled={
+                                        createCommentMutation.isPending ||
+                                        draftComment.trim().length === 0
+                                    }
+                                    className="h-8 gap-1.5 px-3 rounded-lg"
+                                >
+                                    {createCommentMutation.isPending ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <>
+                                            Post
+                                            <Send className="h-3 w-3" />
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* ────────── Comments feed ────────── */}
             {comments.length > 0 && (
-                <>
+                <div className="space-y-0">
                     {comments.map((comment: ReviewComment, index: number) => {
                         const isEditing = editingState?.commentId === comment.id;
                         const canEditOrDelete = comment.isOwner || canModerate;
 
                         return (
                             <div key={comment.id}>
-                                {index > 0 && <Separator className="opacity-40" />}
+                                {index > 0 && <Separator className="opacity-30" />}
 
-                                <div className="flex gap-3 py-4">
-                                    <Avatar className="h-8 w-8 mt-0.5 shrink-0">
+                                <div className="flex gap-3 py-3.5">
+                                    <Avatar className="h-7 w-7 mt-0.5 shrink-0">
                                         <AvatarImage
                                             src={comment.author.avatarUrl || undefined}
                                             alt={comment.author.name ?? 'User'}
                                         />
-                                        <AvatarFallback className="text-xs">
+                                        <AvatarFallback className="text-[10px]">
                                             {(comment.author.name?.[0] || 'U').toUpperCase()}
                                         </AvatarFallback>
                                     </Avatar>
 
-                                    <div className="flex-1 min-w-0 space-y-1.5">
+                                    <div className="flex-1 min-w-0 space-y-1">
                                         {/* Comment header */}
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="flex items-center gap-2 text-sm flex-wrap">
-                                                <span className="font-medium text-foreground/90">
+                                                <span className="font-medium text-foreground/90 text-[13px]">
                                                     {comment.author.name ?? 'Anonymous'}
                                                 </span>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <span className="text-xs text-muted-foreground cursor-default">
-                                                            {timeAgo(comment.createdAt)}
-                                                        </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent className="text-xs">
-                                                        {new Date(comment.createdAt).toLocaleString()}
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                                {comment.isEdited && (
-                                                    <span className="text-xs text-muted-foreground/50 italic">
-                                                        (edited)
-                                                    </span>
-                                                )}
+                                                <span className="flex items-center gap-1.5 text-muted-foreground/40">
+                                                    <span className="text-[3px] leading-none">&#9679;</span>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <span className="text-[11px] cursor-default">
+                                                                {timeAgo(comment.createdAt)}
+                                                            </span>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs">
+                                                            {new Date(comment.createdAt).toLocaleString()}
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    {comment.isEdited && (
+                                                        <>
+                                                            <span className="text-[3px] leading-none">&#9679;</span>
+                                                            <span className="text-[11px] italic">
+                                                                edited
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </span>
                                             </div>
 
                                             {/* Overflow menu */}
@@ -443,20 +491,20 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                     <DropdownMenuTrigger asChild>
                                                         <Button
                                                             variant="ghost"
-                                                            size="icon"
-                                                            className="h-7 w-7 text-muted-foreground/50 hover:text-foreground shrink-0 -mr-1"
+                                                            size="icon-xs"
+                                                            className="text-muted-foreground/30 hover:text-foreground shrink-0 -mr-1"
                                                         >
-                                                            <MoreHorizontal className="h-4 w-4" />
+                                                            <MoreHorizontal className="h-3.5 w-3.5" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-36">
+                                                    <DropdownMenuContent align="end" className="w-32">
                                                         {comment.isOwner && (
                                                             <DropdownMenuItem
                                                                 onClick={() => {
                                                                     setEditingState({ commentId: comment.id, draft: comment.comment });
                                                                 }}
                                                             >
-                                                                <Pencil className="h-4 w-4" />
+                                                                <Pencil className="h-3.5 w-3.5" />
                                                                 Edit
                                                             </DropdownMenuItem>
                                                         )}
@@ -467,7 +515,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                             }
                                                             disabled={deleteCommentMutation.isPending}
                                                         >
-                                                            <Trash2 className="h-4 w-4" />
+                                                            <Trash2 className="h-3.5 w-3.5" />
                                                             Delete
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>
@@ -478,18 +526,19 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                         {/* Comment body or inline edit */}
                                         {isEditing ? (
                                             <div className="space-y-2">
-                                                <Textarea
+                                                <textarea
                                                     value={editingState?.draft ?? ''}
                                                     onChange={(e) => setEditingState((prev) => prev ? { ...prev, draft: e.target.value } : prev)}
                                                     maxLength={2000}
                                                     rows={3}
-                                                    className="resize-none text-sm"
+                                                    className="w-full bg-card/50 text-sm text-foreground/90 resize-none outline-none rounded-lg border border-border/60 px-3 py-2 focus:border-border/80 focus:ring-1 focus:ring-border/30 transition-all"
                                                     autoFocus
                                                 />
                                                 <div className="flex items-center justify-end gap-2">
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
+                                                        className="h-7 text-xs"
                                                         onClick={() => {
                                                             setEditingState(null);
                                                         }}
@@ -498,6 +547,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                     </Button>
                                                     <Button
                                                         size="sm"
+                                                        className="h-7 text-xs"
                                                         onClick={() => handleSaveEdit(comment.id)}
                                                         disabled={
                                                             updateCommentMutation.isPending ||
@@ -505,7 +555,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                         }
                                                     >
                                                         {updateCommentMutation.isPending ? (
-                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
                                                         ) : (
                                                             'Save'
                                                         )}
@@ -513,7 +563,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
+                                            <p className="text-sm text-foreground/70 whitespace-pre-wrap leading-relaxed">
                                                 {comment.comment}
                                             </p>
                                         )}
@@ -522,7 +572,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                             </div>
                         );
                     })}
-                </>
+                </div>
             )}
 
             {/* Loading state */}
@@ -535,11 +585,11 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
             {/* Empty state */}
             {comments.length === 0 && !commentsQuery.isLoading && (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <div className="rounded-full bg-muted/50 p-4 mb-3">
-                        <MessageSquare className="h-6 w-6 text-muted-foreground/50 stroke-[1.5]" />
+                    <div className="rounded-full bg-muted/30 p-3.5 mb-3">
+                        <MessageSquare className="h-5 w-5 text-muted-foreground/40 stroke-[1.5]" />
                     </div>
-                    <p className="text-sm font-medium text-foreground/70">No reviews yet</p>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="text-sm font-medium text-foreground/60">No reviews yet</p>
+                    <p className="text-xs text-muted-foreground/50 mt-1">
                         Be the first to share your thoughts
                     </p>
                 </div>
@@ -547,11 +597,11 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
 
             {/* Load more */}
             {commentsQuery.hasNextPage && (
-                <div className="flex justify-center">
+                <div className="flex justify-center pt-1">
                     <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="border-border/60 bg-secondary/40 hover:bg-secondary/70 text-foreground/80"
+                        className="text-muted-foreground hover:text-foreground text-xs"
                         onClick={() => commentsQuery.fetchNextPage()}
                         disabled={commentsQuery.isFetchingNextPage}
                     >
