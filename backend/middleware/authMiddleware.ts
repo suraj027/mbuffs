@@ -35,6 +35,22 @@ export const deserializeUser = async (req: Request, res: Response, next: NextFun
     req.user = null;
     req.session = null;
 
+    // Test-only override for integration tests.
+    if (process.env.NODE_ENV === 'test') {
+        const testUserId = req.get('x-test-user-id');
+        const testUserRole = req.get('x-test-user-role') || 'user';
+
+        if (testUserId) {
+            req.userId = testUserId;
+            req.user = {
+                id: testUserId,
+                role: testUserRole,
+            } as User;
+            req.session = null;
+            return next();
+        }
+    }
+
     try {
         const session = await auth.api.getSession({
             headers: fromNodeHeaders(req.headers),

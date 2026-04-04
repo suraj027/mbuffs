@@ -9,7 +9,10 @@ import {
     RecommendationsResponse, RecommendationCollectionsResponse, CategoryRecommendationsResponse,
     CombinedRatingsResponse,
     RecommendationCacheDebugResponse,
-    MultiSearchResults
+    MultiSearchResults,
+    ReviewSummaryResponse,
+    PaginatedCommentsResponse,
+    ReviewComment
 } from './types';
 
 const _dayjs = dayjs();
@@ -857,6 +860,70 @@ export const fetchCombinedRatingsApi = async (
         console.error(`Failed to fetch ratings for ${mediaType} ${tmdbId}:`, error);
         return null;
     }
+};
+
+// --- Reviews API Functions ---
+export const fetchReviewSummaryApi = async (
+    mediaType: 'movie' | 'tv',
+    tmdbId: number
+): Promise<ReviewSummaryResponse> => {
+    return fetchBackend(`/reviews/${mediaType}/${tmdbId}/summary`);
+};
+
+export const fetchCommentsApi = async (
+    mediaType: 'movie' | 'tv',
+    tmdbId: number,
+    options: { cursor?: string; limit?: number } = {}
+): Promise<PaginatedCommentsResponse> => {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set('cursor', options.cursor);
+    if (options.limit) params.set('limit', String(options.limit));
+
+    const query = params.toString();
+    const suffix = query ? `?${query}` : '';
+    return fetchBackend(`/reviews/${mediaType}/${tmdbId}/comments${suffix}`);
+};
+
+export const upsertRatingApi = async (
+    mediaType: 'movie' | 'tv',
+    tmdbId: number,
+    rating: number
+): Promise<{ rating: { rating: number }; summary: ReviewSummaryResponse }> => {
+    return fetchBackend(`/reviews/${mediaType}/${tmdbId}/rating`, {
+        method: 'PUT',
+        body: JSON.stringify({ rating }),
+    });
+};
+
+export const createCommentApi = async (
+    mediaType: 'movie' | 'tv',
+    tmdbId: number,
+    comment: string
+): Promise<{ comment: ReviewComment }> => {
+    return fetchBackend(`/reviews/${mediaType}/${tmdbId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ comment }),
+    });
+};
+
+export const updateCommentApi = async (
+    commentId: string,
+    comment: string
+): Promise<{ comment: ReviewComment }> => {
+    return fetchBackend(`/reviews/comments/${commentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ comment }),
+    });
+};
+
+export const deleteCommentApi = async (
+    commentId: string,
+    reason?: string
+): Promise<void> => {
+    await fetchBackend(`/reviews/comments/${commentId}`, {
+        method: 'DELETE',
+        body: JSON.stringify(reason ? { reason } : {}),
+    });
 };
 
 // --- Reddit Recommendations API Functions ---

@@ -16,6 +16,7 @@ import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Cl
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { ReviewSection } from '@/components/reviews/ReviewSection';
 
 const TMDB_LOGO_BASE = 'https://image.tmdb.org/t/p/w92';
 
@@ -1022,6 +1023,10 @@ const MovieDetail = () => {
                                 ))}
                             </div>
                         </section>
+                    )}
+
+                    {mediaType && mediaId && (
+                        <ReviewSection mediaType={mediaType} tmdbId={Number(mediaId)} />
                     )}
 
                     {/* Seasons Section (TV Shows) */}

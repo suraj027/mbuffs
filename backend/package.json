@@ -13,7 +13,9 @@
     "db:push": "drizzle-kit push",
     "db:diff": "drizzle-kit push --verbose --strict",
     "db:studio": "drizzle-kit studio",
-    "scrape:reddit": "node scripts/scrapeReddit.mjs"
+    "scrape:reddit": "node scripts/scrapeReddit.mjs",
+    "test:integration": "NODE_ENV=test node db/migrate.mjs && NODE_ENV=test vitest run --config vitest.integration.config.ts",
+    "test:integration:watch": "NODE_ENV=test vitest --config vitest.integration.config.ts"
   },
   "keywords": [],
   "author": "",
@@ -37,8 +39,11 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
+    "@types/supertest": "^6.0.3",
     "drizzle-kit": "^0.31.10",
+    "supertest": "^7.1.4",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
   }
 }

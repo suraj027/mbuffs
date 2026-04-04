@@ -111,3 +111,50 @@ export interface GoogleUser {
     email_verified?: boolean;
     locale?: string;
 }
+
+// --- Reviews Types ---
+export type MediaType = 'movie' | 'tv';
+
+export interface ReviewSummaryResponse {
+    media: {
+        mediaType: MediaType;
+        tmdbId: number;
+    };
+    summary: {
+        averageRating: number | null;
+        ratingsCount: number;
+        commentsCount: number;
+    };
+    userRating: number | null;
+}
+
+export interface ReviewCommentAuthor {
+    id: string;
+    name: string | null;
+    avatarUrl: string | null;
+}
+
+export interface ReviewComment {
+    id: string;
+    mediaType: MediaType;
+    tmdbId: number;
+    comment: string;
+    createdAt: string;
+    updatedAt: string;
+    isEdited: boolean;
+    author: ReviewCommentAuthor;
+    isOwner: boolean;
+}
+
+export interface PaginatedCommentsResponse {
+    media: {
+        mediaType: MediaType;
+        tmdbId: number;
+    };
+    comments: ReviewComment[];
+    pagination: {
+        nextCursor: string | null;
+        hasMore: boolean;
+        limit: number;
+    };
+}

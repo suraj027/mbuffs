@@ -501,3 +501,46 @@ export interface CombinedRatingsResponse {
     frightening: SeverityLevel | null;
   } | null;
 }
+
+// --- Reviews Types ---
+export interface ReviewSummaryResponse {
+  media: {
+    mediaType: 'movie' | 'tv';
+    tmdbId: number;
+  };
+  summary: {
+    averageRating: number | null;
+    ratingsCount: number;
+    commentsCount: number;
+  };
+  userRating: number | null;
+}
+
+export interface ReviewComment {
+  id: string;
+  mediaType: 'movie' | 'tv';
+  tmdbId: number;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+  isEdited: boolean;
+  author: {
+    id: string;
+    name: string | null;
+    avatarUrl: string | null;
+  };
+  isOwner: boolean;
+}
+
+export interface PaginatedCommentsResponse {
+  media: {
+    mediaType: 'movie' | 'tv';
+    tmdbId: number;
+  };
+  comments: ReviewComment[];
+  pagination: {
+    nextCursor: string | null;
+    hasMore: boolean;
+    limit: number;
+  };
+}

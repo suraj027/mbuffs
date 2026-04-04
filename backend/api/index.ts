@@ -12,12 +12,14 @@ import adminRoutes from '../routes/adminRoutes.js';
 import recommendationRoutes from '../routes/recommendationRoutes.js';
 import parentalGuidanceRoutes from '../routes/parentalGuidanceRoutes.js';
 import redditRoutes from '../routes/redditRoutes.js';
+import reviewRoutes from '../routes/reviewRoutes.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 dotenv.config({
     path: './.env'
 });
 
-const app: Express = express();
 const port = process.env.PORT || 5001;
 
 // --- CORS Setup --- 
@@ -32,62 +34,76 @@ if (process.env.NODE_ENV !== 'production') {
     console.debug('[api] CORS configured', { origin: corsOptions.origin });
 }
 
-// Apply CORS globally
-app.use(cors(corsOptions));
+export const createApp = (): Express => {
+    const app: Express = express();
 
-app.use(cookieParser());
+    // Apply CORS globally
+    app.use(cors(corsOptions));
 
-// IMPORTANT: Better Auth routes must be mounted BEFORE express.json()
-// Better Auth handles its own body parsing
-app.use('/api/auth', oauthRoutes);
+    app.use(cookieParser());
 
-// Apply JSON middleware for other routes (2mb limit for avatar uploads)
-app.use(express.json({ limit: '2mb' }));
+    // IMPORTANT: Better Auth routes must be mounted BEFORE express.json()
+    // Better Auth handles its own body parsing
+    app.use('/api/auth', oauthRoutes);
 
-// Attach userId info from session to req if available
-app.use(deserializeUser);
+    // Apply JSON middleware for other routes (2mb limit for avatar uploads)
+    app.use(express.json({ limit: '2mb' }));
 
-// --- API Routes ---
-app.use('/api/collections', collectionRoutes);
-app.use('/api/content', contentRoutes);
-app.use('/api/user', userRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/recommendations', recommendationRoutes);
-app.use('/api/ratings', parentalGuidanceRoutes);
-app.use('/api/reddit', redditRoutes);
+    // Attach userId info from session to req if available
+    app.use(deserializeUser);
 
-app.get('/api', (req: Request, res: Response) => {
-    res.json({ message: `Welcome to the mbuffs API! ${process.env.FRONTEND_URL}` });
-});
+    // --- API Routes ---
+    app.use('/api/collections', collectionRoutes);
+    app.use('/api/content', contentRoutes);
+    app.use('/api/user', userRoutes);
+    app.use('/api/admin', adminRoutes);
+    app.use('/api/recommendations', recommendationRoutes);
+    app.use('/api/ratings', parentalGuidanceRoutes);
+    app.use('/api/reddit', redditRoutes);
+    app.use('/api/reviews', reviewRoutes);
 
-// --- Define Global Error Handler with explicit type ---
-const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
-    console.error("[ERROR]", err);
-
-    let statusCode = 500;
-    let message = 'Internal Server Error';
-
-    // Handle Zod validation errors
-    if (err instanceof z.ZodError) {
-        statusCode = 400; // Bad Request
-        message = err.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-    }
-
-    // Send a JSON response
-    res.status(statusCode).json({
-        status: 'error',
-        statusCode,
-        message,
-        // Optionally include stack trace in development
-        ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
+    app.get('/api', (req: Request, res: Response) => {
+        res.json({ message: `Welcome to the mbuffs API! ${process.env.FRONTEND_URL}` });
     });
+
+    // --- Define Global Error Handler with explicit type ---
+    const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
+        console.error('[ERROR]', err);
+
+        let statusCode = 500;
+        let message = 'Internal Server Error';
+
+        // Handle Zod validation errors
+        if (err instanceof z.ZodError) {
+            statusCode = 400; // Bad Request
+            message = err.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+        }
+
+        // Send a JSON response
+        res.status(statusCode).json({
+            status: 'error',
+            statusCode,
+            message,
+            // Optionally include stack trace in development
+            ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
+        });
+    };
+
+    app.use(globalErrorHandler);
+
+    return app;
 };
 
-app.use(globalErrorHandler);
+const app = createApp();
 
-app.listen(port, () => {
-    console.info(`[api] Server listening on port ${port}`);
-});
+const isDirectExecution = process.argv[1]
+    ? fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+    : false;
 
-// Export the app instance for Vercel (or other serverless platforms)
+if (isDirectExecution) {
+    app.listen(port, () => {
+        console.info(`[api] Server listening on port ${port}`);
+    });
+}
+
 export default app;

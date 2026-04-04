@@ -52,3 +52,43 @@ export const searchMovieSchema = z.object({
   query: z.string().min(1, "Search query cannot be empty"),
 });
 export type SearchMovieInput = z.infer<typeof searchMovieSchema>;
+
+// --- Reviews Schemas ---
+
+export const mediaIdentityParamsSchema = z.object({
+  mediaType: z.enum(['movie', 'tv']),
+  tmdbId: z.coerce.number().int().positive(),
+});
+
+export type MediaIdentityParamsInput = z.infer<typeof mediaIdentityParamsSchema>;
+
+export const upsertRatingSchema = z.object({
+  rating: z.number().int().min(1).max(10),
+});
+
+export type UpsertRatingInput = z.infer<typeof upsertRatingSchema>;
+
+export const createCommentSchema = z.object({
+  comment: z.string().trim().min(1).max(2000),
+});
+
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const updateCommentSchema = z.object({
+  comment: z.string().trim().min(1).max(2000),
+});
+
+export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
+
+export const deleteCommentSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
+});
+
+export type DeleteCommentInput = z.infer<typeof deleteCommentSchema>;
+
+export const commentsPaginationSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type CommentsPaginationInput = z.infer<typeof commentsPaginationSchema>;

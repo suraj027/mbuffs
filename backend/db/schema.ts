@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, unique, text, varchar, timestamp, boolean, primaryKey, pgSequence, integer } from "drizzle-orm/pg-core"
+import { pgTable, index, foreignKey, unique, text, varchar, timestamp, boolean, primaryKey, pgSequence, integer, check } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const migrationsIdSeq = pgSequence("_migrations_id_seq", { startWith: "1", increment: "1", minValue: "1", maxValue: "2147483647", cache: "1", cycle: false })
@@ -300,4 +300,62 @@ export const redditRecommendations = pgTable("reddit_recommendations", {
 	index("idx_reddit_recommendations_media_type").using("btree", table.mediaType.asc().nullsLast().op("text_ops")),
 	index("idx_reddit_recommendations_subreddit").using("btree", table.subreddit.asc().nullsLast().op("text_ops")),
 	unique("reddit_recommendations_title_key").on(table.title),
+]);
+
+// ============================================================================
+// MEDIA RATINGS TABLE
+// Canonical media identity: (media_type, tmdb_id)
+// ============================================================================
+export const mediaRatings = pgTable("media_ratings", {
+	id: text().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	mediaType: text("media_type").notNull(), // 'movie' | 'tv'
+	tmdbId: integer("tmdb_id").notNull(),
+	rating: integer().notNull(), // 1..10
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [user.id],
+		name: "media_ratings_user_id_fkey"
+	}).onDelete("cascade"),
+	index("idx_media_ratings_media").using("btree", table.mediaType.asc().nullsLast().op("text_ops"), table.tmdbId.asc().nullsLast()),
+	index("idx_media_ratings_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+	unique("media_ratings_user_media_unique").on(table.userId, table.mediaType, table.tmdbId),
+	check("media_ratings_media_type_check", sql`${table.mediaType} IN ('movie', 'tv')`),
+	check("media_ratings_rating_check", sql`${table.rating} >= 1 AND ${table.rating} <= 10`),
+]);
+
+// ============================================================================
+// MEDIA COMMENTS TABLE
+// Non-threaded v1 comments. Soft-delete ready.
+// ============================================================================
+export const mediaComments = pgTable("media_comments", {
+	id: text().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	mediaType: text("media_type").notNull(), // 'movie' | 'tv'
+	tmdbId: integer("tmdb_id").notNull(),
+	comment: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+	deletedByUserId: text("deleted_by_user_id"),
+	deletionReason: text("deletion_reason"),
+}, (table) => [
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [user.id],
+		name: "media_comments_user_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.deletedByUserId],
+		foreignColumns: [user.id],
+		name: "media_comments_deleted_by_user_id_fkey"
+	}).onDelete("set null"),
+	index("idx_media_comments_media_created_desc").using("btree", table.mediaType.asc().nullsLast().op("text_ops"), table.tmdbId.asc().nullsLast(), table.createdAt.desc().nullsLast(), table.id.desc().nullsLast().op("text_ops")),
+	index("idx_media_comments_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+	index("idx_media_comments_deleted_at").using("btree", table.deletedAt.asc().nullsLast()),
+	check("media_comments_media_type_check", sql`${table.mediaType} IN ('movie', 'tv')`),
+	check("media_comments_comment_length_check", sql`char_length(btrim(${table.comment})) BETWEEN 1 AND 2000`),
 ]);
