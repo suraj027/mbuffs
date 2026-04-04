@@ -122,5 +122,7 @@ Backend:
 ## Notes
 
 - Recommendation generation is cached in Postgres for performance.
+- Recommendation ranking uses a multi-stage pipeline: candidate retrieval -> multi-objective ranking (CTR/CVR/engagement proxies) -> diversity/freshness re-ranking -> contextual-bandit exploration.
+- Cold-start recommendations can seed from watched history before falling back to trending + social (Reddit) signals.
 - Backend build script (`npm run build`) runs migrations and a Reddit scrape step.
 - Service worker updates are user-confirmed via an in-app toast.

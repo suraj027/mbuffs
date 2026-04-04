@@ -1,6 +1,6 @@
 import { sql } from '../lib/db.js';
 import { createHash } from 'node:crypto';
-import { getRedditRecommendations, type RedditRecommendation } from './redditService.js';
+import { getRedditRecommendations } from './redditService.js';
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
@@ -32,8 +32,20 @@ interface RecommendationExplainability {
     source_appearances: number;
     matched_genres: number[];
     because_you_liked?: string[];
+    retrieval_channels?: RetrievalChannel[];
     reddit_mentions?: number; // Number of Reddit mentions
     reddit_sentiment?: 'positive' | 'neutral' | 'negative'; // Reddit sentiment
+    stage_scores?: {
+        retrieval: number;
+        ranking: number;
+        rerank: number;
+        bandit: number;
+        final: number;
+        ctr: number;
+        cvr: number;
+        engagement: number;
+        uncertainty: number;
+    };
     score_breakdown: {
         base: number;
         popularity: number;
@@ -43,14 +55,34 @@ interface RecommendationExplainability {
         actor_boost: number;
         primary_boost: number;
         reddit_boost: number; // Reddit popularity boost
+        novelty_boost?: number;
+        freshness_boost?: number;
+        diversity_boost?: number;
+        bandit_boost?: number;
         total: number;
     };
 }
+
+type RetrievalChannel =
+    | 'tmdb_graph'
+    | 'director_discover'
+    | 'actor_discover'
+    | 'discover_supplement'
+    | 'trending_explore'
+    | 'cold_start_seed'
+    | 'reddit_signal';
 
 interface RecommendationCandidate {
     item: TMDBMovie;
     score: number;
     sources: number;
+}
+
+interface UserEngagementSignals {
+    watchedCount: number;
+    notInterestedCount: number;
+    watchRate: number;
+    explorationRate: number;
 }
 
 interface TMDBRecommendationsResponse {
@@ -154,7 +186,7 @@ interface RecommendationCacheDebugEntry {
     payload_size: number;
 }
 
-const RECOMMENDATION_CACHE_VERSION = 'v4';
+const RECOMMENDATION_CACHE_VERSION = 'v5';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const recommendationCacheLocks = new Map<string, Promise<void>>();
 
@@ -162,6 +194,9 @@ const recommendationCacheLocks = new Map<string, Promise<void>>();
 const REDDIT_BOOST_ENABLED = true;
 const REDDIT_BOOST_MULTIPLIER = 15; // Points per mention
 const REDDIT_POSITIVE_SENTIMENT_BONUS = 10;
+
+const WATCHED_COLLECTION_NAME = '__watched__';
+const NOT_INTERESTED_COLLECTION_NAME = '__not_interested__';
 
 /**
  * Fetch Reddit recommendations and create a lookup map by TMDB ID
@@ -250,6 +285,10 @@ function applyRedditBoosts(
                 explainability.reddit_sentiment = sentiment as 'positive' | 'neutral' | 'negative' | undefined;
                 explainability.score_breakdown.reddit_boost = boost;
                 explainability.score_breakdown.total += boost;
+                explainability.retrieval_channels = addRetrievalChannel(
+                    explainability.retrieval_channels,
+                    'reddit_signal'
+                );
                 
                 // Add reason code if not already present
                 if (!explainability.reason_codes.includes('reddit_popular')) {
@@ -379,6 +418,601 @@ function addBecauseYouLiked(items: string[], value: string): string[] {
 function formatSourceLabel(label: string, isMovie: boolean): string {
     const suffix = isMovie ? 'movie' : 'tv show';
     return `${label} (${suffix})`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
+}
+
+function safeNumber(value: number | undefined | null): number {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return 0;
+    }
+
+    return value;
+}
+
+function logNormalize(value: number | undefined, maxReference: number): number {
+    if (!value || value <= 0 || maxReference <= 0) {
+        return 0;
+    }
+
+    return clamp(Math.log1p(value) / Math.log1p(maxReference), 0, 1);
+}
+
+function hashToUnitInterval(seed: string): number {
+    const hashPrefix = createHash('sha256').update(seed).digest('hex').slice(0, 8);
+    const parsed = Number.parseInt(hashPrefix, 16);
+
+    if (Number.isNaN(parsed)) {
+        return 0;
+    }
+
+    return parsed / 0xffffffff;
+}
+
+function deterministicSample<T>(
+    values: T[],
+    sampleSize: number,
+    seed: string,
+    keyFn: (value: T) => string
+): T[] {
+    if (sampleSize <= 0 || values.length === 0) {
+        return [];
+    }
+
+    if (values.length <= sampleSize) {
+        return [...values];
+    }
+
+    return [...values]
+        .sort((a, b) => {
+            const scoreA = hashToUnitInterval(`${seed}:${keyFn(a)}`);
+            const scoreB = hashToUnitInterval(`${seed}:${keyFn(b)}`);
+
+            if (scoreA === scoreB) {
+                return keyFn(a).localeCompare(keyFn(b));
+            }
+
+            return scoreA - scoreB;
+        })
+        .slice(0, sampleSize);
+}
+
+function getReleaseYear(item: TMDBMovie): number | null {
+    const rawDate = item.release_date || item.first_air_date;
+    if (!rawDate) {
+        return null;
+    }
+
+    const parsedYear = Number.parseInt(rawDate.slice(0, 4), 10);
+    return Number.isNaN(parsedYear) ? null : parsedYear;
+}
+
+function getFreshnessScore(item: TMDBMovie): number {
+    const releaseYear = getReleaseYear(item);
+    if (!releaseYear) {
+        return 0.35;
+    }
+
+    const currentYear = new Date().getUTCFullYear();
+    const age = Math.max(currentYear - releaseYear, 0);
+
+    if (age <= 1) {
+        return 1;
+    }
+
+    if (age <= 3) {
+        return 0.85;
+    }
+
+    if (age <= 8) {
+        return 0.6;
+    }
+
+    if (age <= 15) {
+        return 0.35;
+    }
+
+    return 0.2;
+}
+
+function getCandidateKey(candidate: RecommendationCandidate): string {
+    const isTv = candidate.item.media_type === 'tv' || (!!candidate.item.first_air_date && !candidate.item.release_date);
+    return isTv ? `${candidate.item.id}tv` : `${candidate.item.id}`;
+}
+
+function getPrimaryGenre(item: TMDBMovie): number | null {
+    if (!item.genre_ids || item.genre_ids.length === 0) {
+        return null;
+    }
+
+    return item.genre_ids[0] ?? null;
+}
+
+function addRetrievalChannel(channels: RetrievalChannel[] | undefined, channel: RetrievalChannel): RetrievalChannel[] {
+    if (!channels) {
+        return [channel];
+    }
+
+    if (channels.includes(channel)) {
+        return channels;
+    }
+
+    return [...channels, channel];
+}
+
+function inferRetrievalChannels(reasonCodes: string[]): RetrievalChannel[] {
+    const channels: RetrievalChannel[] = [];
+
+    for (const reason of reasonCodes) {
+        if (reason === 'tmdb_recommendation_or_similar') {
+            channels.push('tmdb_graph');
+        } else if (reason === 'director_affinity') {
+            channels.push('director_discover');
+        } else if (reason === 'actor_affinity') {
+            channels.push('actor_discover');
+        } else if (reason === 'discover_supplement') {
+            channels.push('discover_supplement');
+        } else if (reason === 'cold_start_trending') {
+            channels.push('trending_explore');
+        } else if (reason === 'cold_start_seeded') {
+            channels.push('cold_start_seed');
+        } else if (reason === 'reddit_popular') {
+            channels.push('reddit_signal');
+        }
+    }
+
+    if (channels.length === 0) {
+        channels.push('tmdb_graph');
+    }
+
+    return Array.from(new Set(channels));
+}
+
+function getCandidateArm(candidate: RecommendationCandidate): RetrievalChannel {
+    const reasonCodes = candidate.item.explainability?.reason_codes || [];
+    const channels = inferRetrievalChannels(reasonCodes);
+
+    return channels[0] ?? 'tmdb_graph';
+}
+
+function computeUncertaintyScore(candidate: RecommendationCandidate): number {
+    const voteCountNorm = logNormalize(candidate.item.vote_count, 12000);
+    const popularityNorm = logNormalize(candidate.item.popularity, 600);
+    const sourceNorm = clamp(candidate.sources / 5, 0, 1);
+
+    return clamp((1 - voteCountNorm) * 0.45 + (1 - popularityNorm) * 0.35 + (1 - sourceNorm) * 0.2, 0, 1);
+}
+
+function paginateOrderedCandidates(
+    candidates: RecommendationCandidate[],
+    page: number,
+    limit: number
+): RecommendationCandidate[] {
+    if (limit <= 0 || page <= 0 || candidates.length === 0) {
+        return [];
+    }
+
+    const startIndex = (page - 1) * limit;
+    if (startIndex >= candidates.length) {
+        return [];
+    }
+
+    return candidates.slice(startIndex, startIndex + limit);
+}
+
+function buildStringToken(values: string[]): string {
+    if (values.length === 0) {
+        return 'empty';
+    }
+
+    const normalized = Array.from(new Set(values)).sort();
+    return createHash('sha256').update(normalized.join('|')).digest('hex').slice(0, 20);
+}
+
+function buildCollectionMovieToken(items: CollectionMovie[]): string {
+    return buildStringToken(items.map((item) => item.movie_id));
+}
+
+function applyProfileJitter(
+    candidates: RecommendationCandidate[],
+    profileToken: string,
+    magnitude: number = 4
+): RecommendationCandidate[] {
+    if (candidates.length <= 1 || magnitude <= 0) {
+        return candidates;
+    }
+
+    return candidates
+        .map((candidate) => {
+            const key = getCandidateKey(candidate);
+            const jitterBase = (hashToUnitInterval(`${profileToken}:${key}`) - 0.5) * 2;
+            const uncertainty = computeUncertaintyScore(candidate);
+            const jitter = jitterBase * magnitude * (0.35 + uncertainty * 0.65);
+            const updatedScore = candidate.score + jitter;
+
+            const explainability = candidate.item.explainability;
+            if (explainability) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'profile_shuffle');
+                explainability.score_breakdown.total = updatedScore;
+                const stageScores = explainability.stage_scores;
+                if (stageScores) {
+                    stageScores.final = updatedScore;
+                }
+            }
+
+            return {
+                ...candidate,
+                score: updatedScore
+            };
+        })
+        .sort((a, b) => b.score - a.score);
+}
+
+function applyMultiObjectiveRanking(
+    candidates: RecommendationCandidate[],
+    genreScores: Map<number, number>,
+    engagementSignals: UserEngagementSignals
+): RecommendationCandidate[] {
+    if (candidates.length === 0) {
+        return [];
+    }
+
+    const sortedGenreScores = Array.from(genreScores.values()).sort((a, b) => b - a);
+    const maxGenreAffinity = sortedGenreScores.slice(0, 3).reduce((sum, value) => sum + value, 0) || 1;
+    const maxRetrievalScore = candidates.reduce((max, candidate) => Math.max(max, candidate.score), 1);
+
+    const longTermWeight = engagementSignals.watchedCount >= 30 ? 0.3 : 0.24;
+    const cvrWeight = engagementSignals.watchRate >= 0.6 ? 0.4 : 0.35;
+    const ctrWeight = clamp(1 - longTermWeight - cvrWeight, 0.2, 0.5);
+    const weightSum = ctrWeight + cvrWeight + longTermWeight;
+
+    const ranked = candidates.map((candidate) => {
+        const explainability = candidate.item.explainability;
+        const scoreBreakdown = explainability?.score_breakdown;
+
+        const retrievalNorm = clamp(candidate.score / maxRetrievalScore, 0, 1);
+        const ratingNorm = clamp(safeNumber(candidate.item.vote_average) / 10, 0, 1);
+        const popularityNorm = logNormalize(candidate.item.popularity, 600);
+        const voteCountNorm = logNormalize(candidate.item.vote_count, 12000);
+        const sourceNorm = clamp(candidate.sources / 5, 0, 1);
+        const redditNorm = clamp(safeNumber(scoreBreakdown?.reddit_boost) / 100, 0, 1);
+
+        const genreAffinityRaw = (candidate.item.genre_ids || []).reduce((sum, genreId) => {
+            return sum + (genreScores.get(genreId) || 0);
+        }, 0);
+        const genreAffinityNorm = clamp(genreAffinityRaw / maxGenreAffinity, 0, 1);
+
+        const directorAffinityNorm = clamp(safeNumber(scoreBreakdown?.director_boost) / 24, 0, 1);
+        const actorAffinityNorm = clamp(safeNumber(scoreBreakdown?.actor_boost) / 20, 0, 1);
+        const freshnessScore = getFreshnessScore(candidate.item);
+        const noveltyScore = clamp(1 - (sourceNorm * 0.5 + popularityNorm * 0.35 + voteCountNorm * 0.15), 0, 1);
+
+        const ctrScore = clamp(
+            popularityNorm * 0.35 +
+                voteCountNorm * 0.25 +
+                sourceNorm * 0.2 +
+                redditNorm * 0.2,
+            0,
+            1
+        );
+
+        const cvrScore = clamp(
+            genreAffinityNorm * 0.45 +
+                directorAffinityNorm * 0.2 +
+                actorAffinityNorm * 0.15 +
+                ratingNorm * 0.2,
+            0,
+            1
+        );
+
+        const longTermEngagementScore = clamp(
+            freshnessScore * 0.45 +
+                noveltyScore * 0.35 +
+                ratingNorm * 0.2,
+            0,
+            1
+        );
+
+        const objectiveScore = (
+            ctrWeight * ctrScore +
+            cvrWeight * cvrScore +
+            longTermWeight * longTermEngagementScore
+        ) / weightSum;
+
+        const rankingScore = retrievalNorm * 45 + objectiveScore * 165;
+
+        if (explainability) {
+            explainability.retrieval_channels = Array.from(
+                new Set([
+                    ...(explainability.retrieval_channels || []),
+                    ...inferRetrievalChannels(explainability.reason_codes)
+                ])
+            );
+            explainability.score_breakdown.novelty_boost = noveltyScore * 20;
+            explainability.score_breakdown.freshness_boost = freshnessScore * 20;
+            explainability.score_breakdown.total = rankingScore;
+            explainability.stage_scores = {
+                retrieval: retrievalNorm,
+                ranking: objectiveScore,
+                rerank: objectiveScore,
+                bandit: 0,
+                final: objectiveScore,
+                ctr: ctrScore,
+                cvr: cvrScore,
+                engagement: longTermEngagementScore,
+                uncertainty: computeUncertaintyScore(candidate)
+            };
+
+            if (ctrScore >= 0.72) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'high_ctr_signal');
+            }
+            if (cvrScore >= 0.72) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'high_cvr_signal');
+            }
+            if (longTermEngagementScore >= 0.72) {
+                explainability.reason_codes = addReasonCode(
+                    explainability.reason_codes,
+                    'long_term_engagement_signal'
+                );
+            }
+        }
+
+        return {
+            ...candidate,
+            score: rankingScore
+        };
+    });
+
+    return ranked.sort((a, b) => b.score - a.score);
+}
+
+function computeCandidateSimilarity(a: RecommendationCandidate, b: RecommendationCandidate): number {
+    const aGenres = new Set(a.item.genre_ids || []);
+    const bGenres = new Set(b.item.genre_ids || []);
+    const unionSize = new Set([...(a.item.genre_ids || []), ...(b.item.genre_ids || [])]).size;
+
+    let intersectionSize = 0;
+    for (const genreId of aGenres) {
+        if (bGenres.has(genreId)) {
+            intersectionSize += 1;
+        }
+    }
+
+    const genreSimilarity = unionSize > 0 ? intersectionSize / unionSize : 0;
+
+    const releaseYearA = getReleaseYear(a.item);
+    const releaseYearB = getReleaseYear(b.item);
+    const yearSimilarity = releaseYearA && releaseYearB
+        ? clamp(1 - Math.abs(releaseYearA - releaseYearB) / 20, 0, 1)
+        : 0;
+
+    const popularityA = safeNumber(a.item.popularity);
+    const popularityB = safeNumber(b.item.popularity);
+    const popularitySimilarity = clamp(1 - Math.abs(popularityA - popularityB) / 250, 0, 1);
+
+    return genreSimilarity * 0.6 + yearSimilarity * 0.25 + popularitySimilarity * 0.15;
+}
+
+function rerankCandidatesWithConstraints(candidates: RecommendationCandidate[]): RecommendationCandidate[] {
+    if (candidates.length <= 1) {
+        return candidates;
+    }
+
+    const remaining = [...candidates].sort((a, b) => b.score - a.score);
+    const reranked: RecommendationCandidate[] = [];
+    const primaryGenreCounts = new Map<number, number>();
+
+    while (remaining.length > 0) {
+        let bestIndex = 0;
+        let bestScore = Number.NEGATIVE_INFINITY;
+        let bestFreshnessBoost = 0;
+        let bestNoveltyBoost = 0;
+        let bestDiversityPenalty = 0;
+
+        for (let i = 0; i < remaining.length; i += 1) {
+            const candidate = remaining[i];
+            const explainability = candidate.item.explainability;
+            const noveltyBoost = safeNumber(explainability?.score_breakdown.novelty_boost) * 0.35;
+            const freshnessBoost = getFreshnessScore(candidate.item) * 9;
+
+            let diversityPenalty = 0;
+            if (reranked.length > 0) {
+                const maxSimilarity = reranked.reduce((max, selected) => {
+                    return Math.max(max, computeCandidateSimilarity(candidate, selected));
+                }, 0);
+                diversityPenalty += maxSimilarity * 28;
+            }
+
+            const primaryGenre = getPrimaryGenre(candidate.item);
+            const genreCount = primaryGenre ? (primaryGenreCounts.get(primaryGenre) || 0) : 0;
+            if (primaryGenre && reranked.length < 18 && genreCount >= 3) {
+                diversityPenalty += 18;
+            }
+
+            if ((candidate.item.vote_average || 0) < 6 && (candidate.item.vote_count || 0) < 120) {
+                diversityPenalty += 10;
+            }
+
+            const rerankScore = candidate.score + noveltyBoost + freshnessBoost - diversityPenalty;
+
+            if (rerankScore > bestScore) {
+                bestScore = rerankScore;
+                bestIndex = i;
+                bestFreshnessBoost = freshnessBoost;
+                bestNoveltyBoost = noveltyBoost;
+                bestDiversityPenalty = diversityPenalty;
+            }
+        }
+
+        const [selected] = remaining.splice(bestIndex, 1);
+        const explainability = selected.item.explainability;
+        if (explainability) {
+            explainability.score_breakdown.freshness_boost = safeNumber(explainability.score_breakdown.freshness_boost) + bestFreshnessBoost;
+            explainability.score_breakdown.novelty_boost = safeNumber(explainability.score_breakdown.novelty_boost) + bestNoveltyBoost;
+            explainability.score_breakdown.diversity_boost = -bestDiversityPenalty;
+            explainability.score_breakdown.total = bestScore;
+
+            const stageScores = explainability.stage_scores || {
+                retrieval: 0,
+                ranking: 0,
+                rerank: 0,
+                bandit: 0,
+                final: 0,
+                ctr: 0,
+                cvr: 0,
+                engagement: 0,
+                uncertainty: computeUncertaintyScore(selected)
+            };
+            stageScores.rerank = bestScore;
+            stageScores.final = bestScore;
+            explainability.stage_scores = stageScores;
+
+            if (bestFreshnessBoost >= 6) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'freshness_rerank');
+            }
+            if (bestNoveltyBoost >= 5) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'novelty_rerank');
+            }
+            if (bestDiversityPenalty >= 12) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'diversity_guardrail');
+            }
+        }
+
+        const primaryGenre = getPrimaryGenre(selected.item);
+        if (primaryGenre) {
+            primaryGenreCounts.set(primaryGenre, (primaryGenreCounts.get(primaryGenre) || 0) + 1);
+        }
+
+        reranked.push({
+            ...selected,
+            score: bestScore
+        });
+    }
+
+    return reranked;
+}
+
+function applyContextualBanditPolicy(
+    candidates: RecommendationCandidate[],
+    engagementSignals: UserEngagementSignals,
+    page: number,
+    limit: number,
+    seed: string
+): RecommendationCandidate[] {
+    if (candidates.length === 0 || limit <= 0) {
+        return candidates;
+    }
+
+    const adjustedExplorationRate = page > 2
+        ? clamp(engagementSignals.explorationRate - 0.04, 0.05, 0.18)
+        : engagementSignals.explorationRate;
+
+    const explorationSlots = Math.min(
+        Math.max(1, Math.round(limit * adjustedExplorationRate)),
+        Math.max(1, Math.floor(limit / 2))
+    );
+
+    if (candidates.length <= limit + 1 || explorationSlots <= 0) {
+        return candidates;
+    }
+
+    const windowSize = Math.min(candidates.length, Math.max(page * limit + limit * 2, limit * 4));
+    const baseWindow = candidates.slice(0, windowSize);
+    const explorePool = baseWindow.slice(Math.min(limit, baseWindow.length));
+
+    if (explorePool.length === 0) {
+        return candidates;
+    }
+
+    const armStats = new Map<RetrievalChannel, { count: number; scoreSum: number }>();
+    for (const candidate of baseWindow) {
+        const arm = getCandidateArm(candidate);
+        const rankingScore = clamp(
+            safeNumber(candidate.item.explainability?.stage_scores?.ranking),
+            0,
+            1
+        );
+
+        const stat = armStats.get(arm);
+        if (stat) {
+            stat.count += 1;
+            stat.scoreSum += rankingScore;
+        } else {
+            armStats.set(arm, { count: 1, scoreSum: rankingScore });
+        }
+    }
+
+    const scoredPool = explorePool
+        .map((candidate) => {
+            const arm = getCandidateArm(candidate);
+            const armStat = armStats.get(arm);
+            const armMean = armStat ? armStat.scoreSum / armStat.count : 0.5;
+            const armUcb = armStat
+                ? Math.sqrt(Math.log(baseWindow.length + 1) / (armStat.count + 1))
+                : 0.25;
+            const uncertainty = computeUncertaintyScore(candidate);
+            const exploratoryArmBonus = arm === 'trending_explore' || arm === 'discover_supplement' ? 0.05 : 0;
+            const stableJitter = hashToUnitInterval(`${seed}:${getCandidateKey(candidate)}`) * 0.004;
+
+            const banditScore = armMean + uncertainty * 0.35 + armUcb * 0.2 + exploratoryArmBonus + stableJitter;
+            return {
+                candidate,
+                banditScore,
+                uncertainty
+            };
+        })
+        .sort((a, b) => b.banditScore - a.banditScore)
+        .slice(0, explorationSlots);
+
+    if (scoredPool.length === 0) {
+        return candidates;
+    }
+
+    const promotedKeys = new Set(scoredPool.map((entry) => getCandidateKey(entry.candidate)));
+    const exploitationWindow = baseWindow.filter((candidate) => !promotedKeys.has(getCandidateKey(candidate)));
+    const interleavedWindow = [...exploitationWindow];
+
+    scoredPool.forEach((entry, index) => {
+        const candidate = entry.candidate;
+        const explainability = candidate.item.explainability;
+        const banditBoost = 8 + entry.uncertainty * 10;
+
+        if (explainability) {
+            explainability.reason_codes = addReasonCode(explainability.reason_codes, 'bandit_exploration');
+            explainability.retrieval_channels = addRetrievalChannel(
+                explainability.retrieval_channels,
+                getCandidateArm(candidate)
+            );
+            explainability.score_breakdown.bandit_boost = banditBoost;
+            explainability.score_breakdown.total = safeNumber(explainability.score_breakdown.total) + banditBoost;
+
+            const stageScores = explainability.stage_scores || {
+                retrieval: 0,
+                ranking: 0,
+                rerank: 0,
+                bandit: 0,
+                final: 0,
+                ctr: 0,
+                cvr: 0,
+                engagement: 0,
+                uncertainty: entry.uncertainty
+            };
+            stageScores.bandit = banditBoost;
+            stageScores.final = safeNumber(stageScores.final) + banditBoost;
+            stageScores.uncertainty = entry.uncertainty;
+            explainability.stage_scores = stageScores;
+        }
+
+        candidate.score += banditBoost;
+
+        const insertionIndex = Math.min(2 + index * 4, interleavedWindow.length);
+        interleavedWindow.splice(insertionIndex, 0, candidate);
+    });
+
+    const remainingCandidates = candidates.slice(windowSize);
+    return [...interleavedWindow, ...remainingCandidates];
 }
 
 function buildRecommendationCacheKey(
@@ -790,6 +1424,65 @@ async function getMoviesFromRecommendationCollections(userId: string): Promise<C
     return result as CollectionMovie[];
 }
 
+async function getWatchedSeedMovies(userId: string, limit: number): Promise<CollectionMovie[]> {
+    const rows = await sql`
+        SELECT cm.movie_id
+        FROM collection_movies cm
+        JOIN collections c ON cm.collection_id = c.id
+        WHERE c.owner_id = ${userId}
+          AND c.is_system = true
+          AND c.name = ${WATCHED_COLLECTION_NAME}
+        ORDER BY cm.added_at DESC
+        LIMIT ${limit}
+    `;
+
+    return (rows as Array<{ movie_id: string }>).map((row) => {
+        const parsed = parseMovieId(row.movie_id);
+        return {
+            movie_id: row.movie_id,
+            is_movie: parsed.isMovie
+        };
+    });
+}
+
+async function getUserEngagementSignals(userId: string): Promise<UserEngagementSignals> {
+    const rows = await sql`
+        SELECT c.name, COUNT(*)::int AS item_count
+        FROM collection_movies cm
+        JOIN collections c ON cm.collection_id = c.id
+        WHERE c.owner_id = ${userId}
+          AND c.is_system = true
+          AND c.name IN (${WATCHED_COLLECTION_NAME}, ${NOT_INTERESTED_COLLECTION_NAME})
+        GROUP BY c.name
+    `;
+
+    let watchedCount = 0;
+    let notInterestedCount = 0;
+
+    for (const row of rows as Array<{ name: string; item_count: number | string }>) {
+        const count = Number(row.item_count) || 0;
+        if (row.name === WATCHED_COLLECTION_NAME) {
+            watchedCount = count;
+        } else if (row.name === NOT_INTERESTED_COLLECTION_NAME) {
+            notInterestedCount = count;
+        }
+    }
+
+    const totalFeedback = watchedCount + notInterestedCount;
+    const watchRate = totalFeedback > 0 ? watchedCount / totalFeedback : 0.55;
+
+    const lowSignalBoost = totalFeedback < 8 ? 0.08 : totalFeedback < 20 ? 0.04 : 0;
+    const dissatisfactionBoost = watchRate < 0.4 ? 0.08 : watchRate < 0.55 ? 0.04 : 0;
+    const explorationRate = clamp(0.1 + lowSignalBoost + dissatisfactionBoost, 0.08, 0.24);
+
+    return {
+        watchedCount,
+        notInterestedCount,
+        watchRate,
+        explorationRate
+    };
+}
+
 function buildCollectionSnapshotToken(collectionIds: string[]): string {
     const normalized = [...collectionIds].sort();
     return createHash('sha256').update(normalized.join(',')).digest('hex');
@@ -854,57 +1547,193 @@ async function generateColdStartRecommendations(
     sourceCollections: { id: string; name: string }[]
 ): Promise<RecommendationResult> {
     const excludedMovieIds = await getUserSystemExcludedMovieIds(userId);
+    const engagementSignals = await getUserEngagementSignals(userId);
+    const excludedToken = buildStringToken(Array.from(excludedMovieIds));
+    const coldStartProfileTokenBase = buildStringToken([
+        excludedToken,
+        `${engagementSignals.watchedCount}:${engagementSignals.notInterestedCount}:${engagementSignals.watchRate.toFixed(3)}`
+    ]);
+    const genreScores: Map<number, number> = new Map();
+    const allRecommendations: Map<string, RecommendationCandidate> = new Map();
+
+    const watchedSeedItems = await getWatchedSeedMovies(userId, 8);
+    const sampledSeeds = deterministicSample(
+        watchedSeedItems,
+        Math.min(watchedSeedItems.length, 6),
+        `${userId}:cold-start-seeds:${page}:${coldStartProfileTokenBase}`,
+        (item) => item.movie_id
+    );
+
+    if (sampledSeeds.length > 0) {
+        const seedResults = await Promise.all(
+            sampledSeeds.map(async (seed) => {
+                const { id, isMovie } = parseMovieId(seed.movie_id);
+                const [details, recommendations, similar] = await Promise.all([
+                    getItemDetails(id, isMovie),
+                    getRecommendationsForItem(id, isMovie),
+                    getSimilarForItem(id, isMovie)
+                ]);
+
+                if (details?.genres) {
+                    for (const genre of details.genres) {
+                        genreScores.set(genre.id, (genreScores.get(genre.id) || 0) + 1);
+                    }
+                }
+
+                const sourceLabel = formatSourceLabel(details?.title || details?.name || `${id}`, isMovie);
+
+                return {
+                    isMovie,
+                    sourceLabel,
+                    candidates: [...recommendations, ...similar]
+                };
+            })
+        );
+
+        for (const seedResult of seedResults) {
+            for (const item of seedResult.candidates) {
+                const key = seedResult.isMovie ? `${item.id}` : `${item.id}tv`;
+                if (excludedMovieIds.has(key)) {
+                    continue;
+                }
+
+                let genreMatchScore = 0;
+                if (item.genre_ids) {
+                    for (const genreId of item.genre_ids) {
+                        genreMatchScore += genreScores.get(genreId) || 0;
+                    }
+                }
+
+                const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
+                const baseScore = (item.vote_average || 0) * 10;
+                const popularityScore = Math.min((item.popularity || 0) / 10, 45);
+                const genreBoost = genreMatchScore * 5;
+                const combinedScore = baseScore + popularityScore + genreBoost;
+
+                const existing = allRecommendations.get(key);
+                if (existing) {
+                    existing.sources += 1;
+                    const sourceBoost = existing.sources * 15;
+                    existing.score = Math.max(existing.score, combinedScore) + sourceBoost;
+                    const explainability = existing.item.explainability;
+                    if (explainability) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                        explainability.source_appearances = existing.sources;
+                        explainability.matched_genres = matchedGenres;
+                        explainability.because_you_liked = addBecauseYouLiked(
+                            explainability.because_you_liked || [],
+                            seedResult.sourceLabel
+                        );
+                        explainability.score_breakdown.base = baseScore;
+                        explainability.score_breakdown.popularity = popularityScore;
+                        explainability.score_breakdown.genre = genreBoost;
+                        explainability.score_breakdown.source_boost = sourceBoost;
+                        explainability.score_breakdown.total = existing.score;
+                    }
+                } else {
+                    allRecommendations.set(key, {
+                        item: {
+                            ...item,
+                            explainability: {
+                                reason_codes: ['cold_start_seeded', 'tmdb_recommendation_or_similar'],
+                                source_appearances: 1,
+                                matched_genres: matchedGenres,
+                                because_you_liked: [seedResult.sourceLabel],
+                                retrieval_channels: ['cold_start_seed', 'tmdb_graph'],
+                                score_breakdown: {
+                                    base: baseScore,
+                                    popularity: popularityScore,
+                                    genre: genreBoost,
+                                    source_boost: 0,
+                                    director_boost: 0,
+                                    actor_boost: 0,
+                                    primary_boost: 0,
+                                    reddit_boost: 0,
+                                    total: combinedScore
+                                }
+                            }
+                        },
+                        score: combinedScore,
+                        sources: 1
+                    });
+                }
+            }
+        }
+    }
+
     const tmdbPagesToFetch = Math.min(Math.max(page + 1, 2), 6);
+    const pageResults = await Promise.all(
+        Array.from({ length: tmdbPagesToFetch }, (_, i) => i + 1).map(async (tmdbPage) => {
+            const response = await fetchTMDB<TMDBTrendingResponse>('/trending/all/week', {
+                page: tmdbPage.toString()
+            });
 
-    const pagePromises = Array.from({ length: tmdbPagesToFetch }, (_, i) => i + 1).map(async (tmdbPage) => {
-        const response = await fetchTMDB<TMDBTrendingResponse>('/trending/all/week', {
-            page: tmdbPage.toString()
-        });
+            return {
+                results: response?.results || [],
+                total_pages: response?.total_pages || 0,
+                total_results: response?.total_results || 0
+            };
+        })
+    );
 
-        return {
-            results: response?.results || [],
-            total_pages: response?.total_pages || 0,
-            total_results: response?.total_results || 0
-        };
-    });
-
-    const pageResults = await Promise.all(pagePromises);
-    const allResults = pageResults.flatMap((result) => result.results);
+    const trendingItems = pageResults.flatMap((result) => result.results);
     const tmdbTotalPages = pageResults[0]?.total_pages || 0;
-    const tmdbTotalResults = pageResults[0]?.total_results || 0;
+    const seenTrendingIds = new Set<string>();
 
-    const seenIds = new Set<string>();
-    const scoredResults: RecommendationCandidate[] = [];
-
-    for (const item of allResults) {
+    for (const item of trendingItems) {
         const key = getTrendingKey(item);
-        if (!key) {
+        if (!key || excludedMovieIds.has(key) || seenTrendingIds.has(key)) {
             continue;
         }
 
-        if (excludedMovieIds.has(key) || seenIds.has(key)) {
-            continue;
+        seenTrendingIds.add(key);
+
+        let genreMatchScore = 0;
+        if (item.genre_ids) {
+            for (const genreId of item.genre_ids) {
+                genreMatchScore += genreScores.get(genreId) || 0;
+            }
         }
 
-        seenIds.add(key);
-
+        const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId) || 0) > 0);
         const baseScore = (item.vote_average || 0) * 10;
-        const popularityScore = Math.min((item.popularity || 0) / 10, 30);
-        const voteCountScore = Math.min((item.vote_count || 0) / 200, 20);
-        const totalScore = baseScore + popularityScore + voteCountScore;
+        const popularityScore = Math.min((item.popularity || 0) / 10, 35);
+        const voteCountScore = Math.min((item.vote_count || 0) / 220, 18);
+        const genreBoost = genreMatchScore * 4;
+        const totalScore = baseScore + popularityScore + voteCountScore + genreBoost;
 
-        scoredResults.push({
+        if (allRecommendations.has(key)) {
+            const existing = allRecommendations.get(key);
+            if (existing?.item.explainability) {
+                existing.item.explainability.reason_codes = addReasonCode(
+                    existing.item.explainability.reason_codes,
+                    'cold_start_trending'
+                );
+                existing.item.explainability.retrieval_channels = addRetrievalChannel(
+                    existing.item.explainability.retrieval_channels,
+                    'trending_explore'
+                );
+            }
+            continue;
+        }
+
+        allRecommendations.set(key, {
             item: {
                 ...item,
                 explainability: {
-                    reason_codes: ['cold_start_trending'],
+                    reason_codes: sampledSeeds.length > 0
+                        ? ['cold_start_seeded', 'cold_start_trending']
+                        : ['cold_start_trending'],
                     source_appearances: 0,
-                    matched_genres: [],
+                    matched_genres: matchedGenres,
                     because_you_liked: [],
+                    retrieval_channels: sampledSeeds.length > 0
+                        ? ['cold_start_seed', 'trending_explore']
+                        : ['trending_explore'],
                     score_breakdown: {
                         base: baseScore,
-                        popularity: popularityScore,
-                        genre: 0,
+                        popularity: popularityScore + voteCountScore,
+                        genre: genreBoost,
                         source_boost: 0,
                         director_boost: 0,
                         actor_boost: 0,
@@ -919,18 +1748,40 @@ async function generateColdStartRecommendations(
         });
     }
 
-    const filterRatio = allResults.length > 0 ? scoredResults.length / allResults.length : 1;
-    const estimatedTotalResults = Math.floor(tmdbTotalResults * filterRatio);
-    const totalPages = Math.min(Math.ceil(estimatedTotalResults / limit), tmdbTotalPages);
-    const paginatedResults = paginateTopCandidates(scoredResults, page, limit).map((result) => result.item);
+    const redditBoostMap = await getRedditBoostMap();
+    const withRedditBoost = applyRedditBoosts(Array.from(allRecommendations.values()), redditBoostMap);
+    const ranked = applyMultiObjectiveRanking(withRedditBoost, genreScores, engagementSignals);
+    const reranked = rerankCandidatesWithConstraints(ranked);
+    const coldStartProfileToken = buildStringToken([
+        coldStartProfileTokenBase,
+        buildCollectionMovieToken(sampledSeeds)
+    ]);
+    const banditOrdered = applyContextualBanditPolicy(
+        reranked,
+        engagementSignals,
+        page,
+        limit,
+        `${userId}:cold-start:${page}:${limit}:${coldStartProfileToken}`
+    );
+    const shuffledCandidates = applyProfileJitter(
+        banditOrdered,
+        `${userId}:cold-start:${coldStartProfileToken}`,
+        4
+    );
+
+    const totalResults = shuffledCandidates.length;
+    const totalPages = tmdbTotalPages > 0
+        ? Math.min(Math.ceil(totalResults / limit), tmdbTotalPages)
+        : Math.ceil(totalResults / limit);
+    const paginatedResults = paginateOrderedCandidates(shuffledCandidates, page, limit).map((result) => result.item);
 
     return {
         results: paginatedResults,
         sourceCollections,
-        totalSourceItems: 0,
+        totalSourceItems: sampledSeeds.length,
         page,
         total_pages: totalPages,
-        total_results: estimatedTotalResults
+        total_results: totalResults
     };
 }
 
@@ -938,19 +1789,12 @@ async function generateColdStartRecommendations(
  * Main recommendation algorithm
  * 
  * Strategy:
- * 1. Get all movies/TV shows from user's recommendation source collections
- * 2. For each item, fetch TMDB recommendations and similar content (PRIMARY source)
- * 3. Analyze genres to build a preference profile
- * 4. Analyze directors and actors to build preference profiles
- * 5. Fetch a small number of best works from favorite directors (supplementary)
- * 6. Fetch a small number of popular works from favorite actors (supplementary)
- * 7. Score and rank recommendations based on:
- *    - How many times they appear (popularity across sources)
- *    - Genre match with user preferences (primary factor)
- *    - TMDB rating and popularity
- *    - Small boost for director/actor matches
- * 8. Filter out items already in user's collections
- * 9. Return top recommendations
+ * 1. Retrieve candidates from TMDB graph edges (recommendations/similar) and creator affinity expansions
+ * 2. Build user/context profile from genres, creators, and engagement feedback
+ * 3. Rank with a multi-objective scorer (CTR proxy, CVR proxy, long-term engagement)
+ * 4. Re-rank with diversity/novelty/freshness/business constraints
+ * 5. Apply contextual-bandit exploration to avoid local optima
+ * 6. Filter out items already in user's collections and return paginated results
  */
 export async function generateRecommendations(
     userId: string,
@@ -975,20 +1819,41 @@ export async function generateRecommendations(
         return emptyResult;
     }
     
+    const engagementSignals = await getUserEngagementSignals(userId);
+
     // Get source collections
-    const sourceCollections = await getUserRecommendationCollections(userId);
-    if (sourceCollections.length === 0) {
-        return generateColdStartRecommendations(userId, limit, page, []);
+    let sourceCollections = await getUserRecommendationCollections(userId);
+    let sourceMovies: CollectionMovie[] = [];
+    let usingWatchedSeedFallback = false;
+
+    if (sourceCollections.length > 0) {
+        sourceMovies = await getMoviesFromRecommendationCollections(userId);
     }
-    
-    // Get all movies from recommendation source collections
-    const sourceMovies = await getMoviesFromRecommendationCollections(userId);
-    if (sourceMovies.length === 0) {
-        return generateColdStartRecommendations(userId, limit, page, sourceCollections);
+
+    if (sourceCollections.length === 0 || sourceMovies.length === 0) {
+        const watchedSeedMovies = await getWatchedSeedMovies(userId, 12);
+        if (watchedSeedMovies.length > 0) {
+            sourceMovies = watchedSeedMovies;
+            usingWatchedSeedFallback = true;
+            if (sourceCollections.length === 0) {
+                sourceCollections = [{ id: WATCHED_COLLECTION_NAME, name: 'Watched history' }];
+            }
+        } else {
+            return generateColdStartRecommendations(userId, limit, page, sourceCollections);
+        }
     }
     
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
+    const sourceCollectionsToken = buildStringToken(sourceCollectionIds);
+    const sourceMoviesToken = buildCollectionMovieToken(sourceMovies);
+    const exclusionsToken = buildStringToken(Array.from(existingMovieIds));
+    const recommendationProfileToken = buildStringToken([
+        sourceCollectionsToken,
+        sourceMoviesToken,
+        exclusionsToken,
+        `${engagementSignals.watchedCount}:${engagementSignals.notInterestedCount}:${engagementSignals.watchRate.toFixed(3)}`
+    ]);
     
     // Build genre, director, and actor preference profiles
     const genreScores: Map<number, number> = new Map();
@@ -998,9 +1863,12 @@ export async function generateRecommendations(
     
     // Sample a subset of source movies to avoid rate limiting (max 10 for API calls)
     const sampleSize = Math.min(sourceMovies.length, 10);
-    const sampledMovies = sourceMovies
-        .sort(() => Math.random() - 0.5)
-        .slice(0, sampleSize);
+    const sampledMovies = deterministicSample(
+        sourceMovies,
+        sampleSize,
+        `${userId}:for-you:${page}:${limit}:${recommendationProfileToken}`,
+        (movie) => movie.movie_id
+    );
     
     // Fetch details, credits, and recommendations for each sampled source item
     const fetchPromises = sampledMovies.map(async (movie) => {
@@ -1086,25 +1954,32 @@ export async function generateRecommendations(
             const genreBoost = genreMatchScore * 5;
             const combinedScore = baseScore + popularityScore + genreBoost;
             
-            const existing = allRecommendations.get(key);
-            if (existing) {
-                // Item appeared from multiple sources - boost its score
-                existing.sources += 1;
-                const sourceBoost = existing.sources * 20;
-                existing.score = combinedScore + sourceBoost;
-                const explainability = existing.item.explainability;
-                if (explainability) {
-                    explainability.source_appearances = existing.sources;
-                    explainability.matched_genres = matchedGenres;
-                    explainability.because_you_liked = addBecauseYouLiked(
-                        explainability.because_you_liked || [],
-                        sourceLabel
-                    );
-                    explainability.score_breakdown.base = baseScore;
-                    explainability.score_breakdown.popularity = popularityScore;
-                    explainability.score_breakdown.genre = genreBoost;
-                    explainability.score_breakdown.source_boost = sourceBoost;
-                    explainability.score_breakdown.total = existing.score;
+                const existing = allRecommendations.get(key);
+                if (existing) {
+                    // Item appeared from multiple sources - boost its score
+                    existing.sources += 1;
+                    const sourceBoost = existing.sources * 20;
+                    existing.score = combinedScore + sourceBoost;
+                    const explainability = existing.item.explainability;
+                    if (explainability) {
+                        if (usingWatchedSeedFallback) {
+                            explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                        }
+                        explainability.source_appearances = existing.sources;
+                        explainability.matched_genres = matchedGenres;
+                        explainability.because_you_liked = addBecauseYouLiked(
+                            explainability.because_you_liked || [],
+                            sourceLabel
+                        );
+                        explainability.retrieval_channels = addRetrievalChannel(
+                            explainability.retrieval_channels,
+                            'tmdb_graph'
+                        );
+                        explainability.score_breakdown.base = baseScore;
+                        explainability.score_breakdown.popularity = popularityScore;
+                        explainability.score_breakdown.genre = genreBoost;
+                        explainability.score_breakdown.source_boost = sourceBoost;
+                        explainability.score_breakdown.total = existing.score;
                 }
             } else {
                 allRecommendations.set(key, {
@@ -1117,6 +1992,9 @@ export async function generateRecommendations(
                             source_appearances: 1,
                             matched_genres: matchedGenres,
                             because_you_liked: [sourceLabel],
+                            retrieval_channels: usingWatchedSeedFallback
+                                ? ['tmdb_graph', 'cold_start_seed']
+                                : ['tmdb_graph'],
                             score_breakdown: {
                                 base: baseScore,
                                 popularity: popularityScore,
@@ -1133,6 +2011,14 @@ export async function generateRecommendations(
                     score: combinedScore,
                     sources: 1
                 });
+
+                if (usingWatchedSeedFallback) {
+                    const created = allRecommendations.get(key);
+                    const explainability = created?.item.explainability;
+                    if (explainability) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                    }
+                }
             }
         });
     });
@@ -1199,8 +2085,15 @@ export async function generateRecommendations(
                 const explainability = existing.item.explainability;
                 if (explainability) {
                     explainability.reason_codes = addReasonCode(explainability.reason_codes, 'director_affinity');
+                    if (usingWatchedSeedFallback) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                    }
                     explainability.source_appearances = existing.sources;
                     explainability.matched_genres = matchedGenres;
+                    explainability.retrieval_channels = addRetrievalChannel(
+                        explainability.retrieval_channels,
+                        'director_discover'
+                    );
                     explainability.score_breakdown.base = baseScore;
                     explainability.score_breakdown.popularity = popularityScore;
                     explainability.score_breakdown.genre = genreWeight;
@@ -1218,6 +2111,9 @@ export async function generateRecommendations(
                             reason_codes: ['director_affinity', 'genre_match'],
                             source_appearances: 1,
                             matched_genres: matchedGenres,
+                            retrieval_channels: usingWatchedSeedFallback
+                                ? ['director_discover', 'cold_start_seed']
+                                : ['director_discover'],
                             score_breakdown: {
                                 base: baseScore,
                                 popularity: popularityScore,
@@ -1234,6 +2130,14 @@ export async function generateRecommendations(
                     score: combinedScore,
                     sources: 1
                 });
+
+                if (usingWatchedSeedFallback) {
+                    const created = allRecommendations.get(key);
+                    const explainability = created?.item.explainability;
+                    if (explainability) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                    }
+                }
             }
         });
     });
@@ -1294,8 +2198,15 @@ export async function generateRecommendations(
                 const explainability = existing.item.explainability;
                 if (explainability) {
                     explainability.reason_codes = addReasonCode(explainability.reason_codes, 'actor_affinity');
+                    if (usingWatchedSeedFallback) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                    }
                     explainability.source_appearances = existing.sources;
                     explainability.matched_genres = matchedGenres;
+                    explainability.retrieval_channels = addRetrievalChannel(
+                        explainability.retrieval_channels,
+                        'actor_discover'
+                    );
                     explainability.score_breakdown.base = baseScore;
                     explainability.score_breakdown.popularity = popularityScore;
                     explainability.score_breakdown.genre = genreWeight;
@@ -1313,6 +2224,9 @@ export async function generateRecommendations(
                             reason_codes: ['actor_affinity', 'genre_match'],
                             source_appearances: 1,
                             matched_genres: matchedGenres,
+                            retrieval_channels: usingWatchedSeedFallback
+                                ? ['actor_discover', 'cold_start_seed']
+                                : ['actor_discover'],
                             score_breakdown: {
                                 base: baseScore,
                                 popularity: popularityScore,
@@ -1329,20 +2243,57 @@ export async function generateRecommendations(
                     score: combinedScore,
                     sources: 1
                 });
+
+                if (usingWatchedSeedFallback) {
+                    const created = allRecommendations.get(key);
+                    const explainability = created?.item.explainability;
+                    if (explainability) {
+                        explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                    }
+                }
             }
         });
     });
     
     // Apply Reddit popularity boosts to recommendations
     const redditBoostMap = await getRedditBoostMap();
-    const allCandidates = applyRedditBoosts(
+    const withRedditBoost = applyRedditBoosts(
         Array.from(allRecommendations.values()),
         redditBoostMap
     );
-    
-    const totalResults = allCandidates.length;
+
+    if (usingWatchedSeedFallback) {
+        for (const candidate of withRedditBoost) {
+            const explainability = candidate.item.explainability;
+            if (explainability) {
+                explainability.reason_codes = addReasonCode(explainability.reason_codes, 'cold_start_seeded');
+                explainability.retrieval_channels = addRetrievalChannel(
+                    explainability.retrieval_channels,
+                    'cold_start_seed'
+                );
+            }
+        }
+    }
+
+    const rankedCandidates = applyMultiObjectiveRanking(withRedditBoost, genreScores, engagementSignals);
+    const rerankedCandidates = rerankCandidatesWithConstraints(rankedCandidates);
+    const finalCandidates = applyContextualBanditPolicy(
+        rerankedCandidates,
+        engagementSignals,
+        page,
+        limit,
+        `${userId}:for-you:${page}:${limit}:${recommendationProfileToken}`
+    );
+
+    const shuffledCandidates = applyProfileJitter(
+        finalCandidates,
+        `${userId}:for-you:${recommendationProfileToken}`,
+        4
+    );
+
+    const totalResults = shuffledCandidates.length;
     const totalPages = Math.ceil(totalResults / limit);
-    const paginatedResults = paginateTopCandidates(allCandidates, page, limit).map(r => r.item);
+    const paginatedResults = paginateOrderedCandidates(shuffledCandidates, page, limit).map((result) => result.item);
     
     return {
         results: paginatedResults,
@@ -1424,9 +2375,12 @@ export async function generateCategoryRecommendations(
 
     // Sample a subset to avoid rate limiting (max 15 for category recommendations to get more variety)
     const sampleSize = Math.min(sourceItemsOfType.length, 15);
-    const sampledItems = sourceItemsOfType
-        .sort(() => Math.random() - 0.5)
-        .slice(0, sampleSize);
+    const sampledItems = deterministicSample(
+        sourceItemsOfType,
+        sampleSize,
+        `${userId}:categories:${mediaType}:${limit}:${sourceItemsOfType.length}`,
+        (item) => item.movie_id
+    );
 
     // Build genre profile and collect all recommendations (same as For You page)
     const genreScores: Map<number, { id: number; name: string; count: number }> = new Map();
@@ -1681,6 +2635,8 @@ export async function generateGenreRecommendations(
         return emptyResult;
     }
 
+    const engagementSignals = await getUserEngagementSignals(userId);
+
     // Get source collections
     const sourceCollections = await getUserRecommendationCollections(userId);
     if (sourceCollections.length === 0) {
@@ -1695,6 +2651,8 @@ export async function generateGenreRecommendations(
 
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
+    const sourceCollectionsToken = buildStringToken(sourceCollectionIds);
+    const exclusionsToken = buildStringToken(Array.from(existingMovieIds));
 
     // Filter by media type FIRST
     const sourceItemsOfType = sourceMovies.filter(movie => {
@@ -1706,11 +2664,23 @@ export async function generateGenreRecommendations(
         return { ...emptyResult, sourceCollections, totalSourceItems: sourceMovies.length };
     }
 
+    const sourceItemsToken = buildCollectionMovieToken(sourceItemsOfType);
+    const genreProfileToken = buildStringToken([
+        sourceCollectionsToken,
+        sourceItemsToken,
+        exclusionsToken,
+        `${genreId}:${mediaType}`,
+        `${engagementSignals.watchedCount}:${engagementSignals.notInterestedCount}:${engagementSignals.watchRate.toFixed(3)}`
+    ]);
+
     // Use all source items for genre-specific recommendations (up to 20) to get more results
     const sampleSize = Math.min(sourceItemsOfType.length, 20);
-    const sampledItems = sourceItemsOfType
-        .sort(() => Math.random() - 0.5)
-        .slice(0, sampleSize);
+    const sampledItems = deterministicSample(
+        sourceItemsOfType,
+        sampleSize,
+        `${userId}:genre:${genreId}:${mediaType}:${page}:${limit}:${genreProfileToken}`,
+        (item) => item.movie_id
+    );
 
     const isMovie = mediaType === 'movie';
     const mediaEndpoint = isMovie ? 'movie' : 'tv';
@@ -1888,12 +2858,27 @@ export async function generateGenreRecommendations(
         });
     }
 
-    const allCandidates = Array.from(allRecommendations.values());
+    const redditBoostMap = await getRedditBoostMap();
+    const withRedditBoost = applyRedditBoosts(Array.from(allRecommendations.values()), redditBoostMap);
+    const rankedCandidates = applyMultiObjectiveRanking(withRedditBoost, genreScores, engagementSignals);
+    const rerankedCandidates = rerankCandidatesWithConstraints(rankedCandidates);
+    const finalCandidates = applyContextualBanditPolicy(
+        rerankedCandidates,
+        engagementSignals,
+        page,
+        limit,
+        `${userId}:genre:${genreId}:${mediaType}:${page}:${limit}:${genreProfileToken}`
+    );
+    const shuffledCandidates = applyProfileJitter(
+        finalCandidates,
+        `${userId}:genre:${genreId}:${mediaType}:${genreProfileToken}`,
+        4
+    );
 
     // Estimate total - use discover total as baseline since it's larger
-    const estimatedTotal = Math.max(allCandidates.length, discoverTotalResults);
+    const estimatedTotal = Math.max(shuffledCandidates.length, discoverTotalResults);
     const totalPages = Math.ceil(estimatedTotal / limit);
-    const paginatedResults = paginateTopCandidates(allCandidates, page, limit).map(r => r.item);
+    const paginatedResults = paginateOrderedCandidates(shuffledCandidates, page, limit).map((result) => result.item);
 
     return {
         results: paginatedResults,
@@ -1944,6 +2929,8 @@ export async function generatePersonalizedTheatricalReleases(
         return emptyResult;
     }
 
+    const engagementSignals = await getUserEngagementSignals(userId);
+
     // Get source collections
     const sourceCollections = await getUserRecommendationCollections(userId);
     if (sourceCollections.length === 0) {
@@ -1958,6 +2945,8 @@ export async function generatePersonalizedTheatricalReleases(
 
     const sourceCollectionIds = sourceCollections.map(c => c.id);
     const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
+    const sourceCollectionsToken = buildStringToken(sourceCollectionIds);
+    const exclusionsToken = buildStringToken(Array.from(existingMovieIds));
 
     // Build genre preference profile from source items (movies only for theatrical)
     const genreScores: Map<number, number> = new Map();
@@ -1970,11 +2959,22 @@ export async function generatePersonalizedTheatricalReleases(
         return isMovie;
     });
 
+    const sourceMoviesOnlyToken = buildCollectionMovieToken(sourceMoviesOnly);
+    const theatricalProfileToken = buildStringToken([
+        sourceCollectionsToken,
+        sourceMoviesOnlyToken,
+        exclusionsToken,
+        `${engagementSignals.watchedCount}:${engagementSignals.notInterestedCount}:${engagementSignals.watchRate.toFixed(3)}`
+    ]);
+
     // Sample a subset to avoid rate limiting
     const sampleSize = Math.min(sourceMoviesOnly.length, 10);
-    const sampledItems = sourceMoviesOnly
-        .sort(() => Math.random() - 0.5)
-        .slice(0, sampleSize);
+    const sampledItems = deterministicSample(
+        sourceMoviesOnly,
+        sampleSize,
+        `${userId}:theatrical:${page}:${limit}:${theatricalProfileToken}`,
+        (item) => item.movie_id
+    );
 
     // Fetch details and credits for each sampled source item
     const fetchPromises = sampledItems.map(async (movie) => {
@@ -2162,11 +3162,28 @@ export async function generatePersonalizedTheatricalReleases(
         }
     }
 
+    const redditBoostMap = await getRedditBoostMap();
+    const withRedditBoost = applyRedditBoosts(scoredResults, redditBoostMap);
+    const rankedCandidates = applyMultiObjectiveRanking(withRedditBoost, genreScores, engagementSignals);
+    const rerankedCandidates = rerankCandidatesWithConstraints(rankedCandidates);
+    const finalCandidates = applyContextualBanditPolicy(
+        rerankedCandidates,
+        engagementSignals,
+        page,
+        limit,
+        `${userId}:theatrical:${page}:${limit}:${theatricalProfileToken}`
+    );
+    const shuffledCandidates = applyProfileJitter(
+        finalCandidates,
+        `${userId}:theatrical:${theatricalProfileToken}`,
+        4
+    );
+
     // Estimate total results based on TMDB total and our filtering ratio
-    const filterRatio = allResults.length > 0 ? scoredResults.length / allResults.length : 1;
+    const filterRatio = allResults.length > 0 ? shuffledCandidates.length / allResults.length : 1;
     const estimatedTotalResults = Math.floor(tmdbTotalResults * filterRatio);
     const totalPages = Math.min(Math.ceil(estimatedTotalResults / limit), tmdbTotalPages);
-    const paginatedResults = paginateTopCandidates(scoredResults, page, limit).map(r => r.item);
+    const paginatedResults = paginateOrderedCandidates(shuffledCandidates, page, limit).map((result) => result.item);
 
     return {
         results: paginatedResults,

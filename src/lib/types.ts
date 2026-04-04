@@ -23,6 +23,20 @@ export interface Movie {
     source_appearances: number;
     matched_genres: number[];
     because_you_liked?: string[];
+    retrieval_channels?: string[];
+    reddit_mentions?: number;
+    reddit_sentiment?: "positive" | "neutral" | "negative";
+    stage_scores?: {
+      retrieval: number;
+      ranking: number;
+      rerank: number;
+      bandit: number;
+      final: number;
+      ctr: number;
+      cvr: number;
+      engagement: number;
+      uncertainty: number;
+    };
     score_breakdown: {
       base: number;
       popularity: number;
@@ -31,6 +45,11 @@ export interface Movie {
       director_boost: number;
       actor_boost: number;
       primary_boost: number;
+      reddit_boost?: number;
+      novelty_boost?: number;
+      freshness_boost?: number;
+      diversity_boost?: number;
+      bandit_boost?: number;
       total: number;
     };
   };
