@@ -102,15 +102,139 @@ function InteractiveStarRating({
     readoutClassName?: string;
 }) {
     const [hoverRating, setHoverRating] = useState<number | null>(null);
+    const [isTouchPickerOpen, setIsTouchPickerOpen] = useState(false);
+    const starsRowRef = useRef<HTMLDivElement>(null);
+    const touchPickerRef = useRef<HTMLDivElement>(null);
+    const longPressTimerRef = useRef<number | null>(null);
+    const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
+    const suppressNextClickRef = useRef(false);
+    const touchPreviewRatingRef = useRef<number | null>(null);
     const activeRating = hoverRating ?? value ?? 0;
     const filledStars = activeRating / 2;
     const activeTier = activeRating > 0 ? getRatingTier(activeRating) : null;
 
+    const clearLongPressTimer = () => {
+        if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    };
+
+    const getTouchSelectionRect = () => {
+        return touchPickerRef.current?.getBoundingClientRect()
+            ?? starsRowRef.current?.getBoundingClientRect()
+            ?? null;
+    };
+
+    const getRatingFromClientX = (clientX: number) => {
+        const rect = getTouchSelectionRect();
+        if (!rect) {
+            return value ?? 0;
+        }
+
+        const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+        return Math.min(10, Math.max(1, Math.round(ratio * 10 + 0.5)));
+    };
+
+    const updateTouchSelection = (clientX: number) => {
+        const nextRating = getRatingFromClientX(clientX);
+        touchPreviewRatingRef.current = nextRating;
+        setHoverRating(nextRating);
+    };
+
+    const closeTouchPicker = () => {
+        setIsTouchPickerOpen(false);
+        setHoverRating(null);
+        touchPreviewRatingRef.current = null;
+        window.setTimeout(() => {
+            suppressNextClickRef.current = false;
+        }, 0);
+    };
+
+    const commitTouchSelection = () => {
+        const selectedRating = touchPreviewRatingRef.current ?? hoverRating ?? value ?? 0;
+        if (selectedRating > 0 && selectedRating !== value) {
+            onChange(selectedRating);
+        }
+        closeTouchPicker();
+    };
+
+    const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (disabled || event.touches.length === 0) {
+            return;
+        }
+
+        const touch = event.touches[0];
+        touchStartPointRef.current = { x: touch.clientX, y: touch.clientY };
+        clearLongPressTimer();
+
+        longPressTimerRef.current = window.setTimeout(() => {
+            suppressNextClickRef.current = true;
+            setIsTouchPickerOpen(true);
+            updateTouchSelection(touch.clientX);
+        }, 280);
+    };
+
+    const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (event.touches.length === 0) {
+            return;
+        }
+
+        const touch = event.touches[0];
+
+        if (!isTouchPickerOpen) {
+            const start = touchStartPointRef.current;
+            if (!start) {
+                return;
+            }
+
+            const distance = Math.hypot(touch.clientX - start.x, touch.clientY - start.y);
+            if (distance > 12) {
+                clearLongPressTimer();
+            }
+            return;
+        }
+
+        event.preventDefault();
+        updateTouchSelection(touch.clientX);
+    };
+
+    const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+        clearLongPressTimer();
+        touchStartPointRef.current = null;
+
+        if (!isTouchPickerOpen) {
+            return;
+        }
+
+        event.preventDefault();
+        commitTouchSelection();
+    };
+
+    const handleTouchCancel = () => {
+        clearLongPressTimer();
+        touchStartPointRef.current = null;
+        if (isTouchPickerOpen) {
+            closeTouchPicker();
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            clearLongPressTimer();
+        };
+    }, []);
+
     return (
         <div className={cn('flex flex-col items-center gap-1.5', disabled && 'pointer-events-none opacity-50', className)}>
             <div
+                ref={starsRowRef}
                 className="flex items-center gap-1"
                 onMouseLeave={() => setHoverRating(null)}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchCancel}
             >
                 {Array.from({ length: 5 }, (_, i) => {
                     const leftRating = i * 2 + 1;
@@ -138,17 +262,52 @@ function InteractiveStarRating({
                             <div
                                 className="absolute inset-y-0 left-0 w-1/2 z-10"
                                 onMouseEnter={() => setHoverRating(leftRating)}
-                                onClick={() => onChange(leftRating)}
+                                onClick={() => {
+                                    if (suppressNextClickRef.current) return;
+                                    onChange(leftRating);
+                                }}
                             />
                             <div
                                 className="absolute inset-y-0 right-0 w-1/2 z-10"
                                 onMouseEnter={() => setHoverRating(rightRating)}
-                                onClick={() => onChange(rightRating)}
+                                onClick={() => {
+                                    if (suppressNextClickRef.current) return;
+                                    onChange(rightRating);
+                                }}
                             />
                         </div>
                     );
                 })}
             </div>
+
+            {isTouchPickerOpen && (
+                <div
+                    ref={touchPickerRef}
+                    className="rounded-xl border border-border/70 bg-popover/95 backdrop-blur px-3.5 py-2.5 shadow-xl"
+                    style={{ touchAction: 'none' }}
+                    onTouchStart={handleTouchMove}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchCancel={handleTouchCancel}
+                >
+                    <div className="flex items-center gap-1.5">
+                        {Array.from({ length: 5 }, (_, i) => {
+                            const fill = starFillFraction(filledStars, i);
+                            return (
+                                <div key={i} className="relative h-9 w-9">
+                                    <Star className="absolute inset-0 h-9 w-9 text-muted-foreground/25" />
+                                    <div className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
+                                        <Star className={cn('h-9 w-9', activeTier?.starColor ?? 'fill-amber-400 text-amber-400')} />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-center text-muted-foreground/70">
+                        Drag to rate, release to save
+                    </p>
+                </div>
+            )}
 
             {/* Numeric readout + tier label */}
             <div className={cn('flex flex-col items-center gap-0.5 min-h-[2.75rem]', readoutClassName)}>
