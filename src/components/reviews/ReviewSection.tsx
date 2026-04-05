@@ -164,6 +164,12 @@ function InteractiveStarRating({
             return;
         }
 
+        if (isTouchPickerOpen) {
+            event.preventDefault();
+            updateTouchSelection(event.touches[0].clientX);
+            return;
+        }
+
         const touch = event.touches[0];
         touchStartPointRef.current = { x: touch.clientX, y: touch.clientY };
         clearLongPressTimer();
@@ -229,7 +235,7 @@ function InteractiveStarRating({
         <div className={cn('flex flex-col items-center gap-1.5', disabled && 'pointer-events-none opacity-50', className)}>
             <div
                 ref={starsRowRef}
-                className="flex items-center gap-1"
+                className="relative flex items-center gap-1"
                 onMouseLeave={() => setHoverRating(null)}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
@@ -278,36 +284,36 @@ function InteractiveStarRating({
                         </div>
                     );
                 })}
-            </div>
 
-            {isTouchPickerOpen && (
-                <div
-                    ref={touchPickerRef}
-                    className="rounded-xl border border-border/70 bg-popover/95 backdrop-blur px-3.5 py-2.5 shadow-xl"
-                    style={{ touchAction: 'none' }}
-                    onTouchStart={handleTouchMove}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={handleTouchEnd}
-                    onTouchCancel={handleTouchCancel}
-                >
-                    <div className="flex items-center gap-1.5">
-                        {Array.from({ length: 5 }, (_, i) => {
-                            const fill = starFillFraction(filledStars, i);
-                            return (
-                                <div key={i} className="relative h-9 w-9">
-                                    <Star className="absolute inset-0 h-9 w-9 text-muted-foreground/25" />
-                                    <div className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
-                                        <Star className={cn('h-9 w-9', activeTier?.starColor ?? 'fill-amber-400 text-amber-400')} />
+                {isTouchPickerOpen && (
+                    <div
+                        ref={touchPickerRef}
+                        className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 rounded-xl border border-border/70 bg-popover/95 backdrop-blur px-3.5 py-2.5 shadow-xl z-50"
+                        style={{ touchAction: 'none' }}
+                        onTouchStart={handleTouchMove}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                        onTouchCancel={handleTouchCancel}
+                    >
+                        <div className="flex items-center gap-1.5">
+                            {Array.from({ length: 5 }, (_, i) => {
+                                const fill = starFillFraction(filledStars, i);
+                                return (
+                                    <div key={i} className="relative h-9 w-9">
+                                        <Star className="absolute inset-0 h-9 w-9 text-muted-foreground/25" />
+                                        <div className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
+                                            <Star className={cn('h-9 w-9', activeTier?.starColor ?? 'fill-amber-400 text-amber-400')} />
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                        <p className="mt-1.5 text-[10px] text-center text-muted-foreground/70">
+                            Drag to rate, release to save
+                        </p>
                     </div>
-                    <p className="mt-1.5 text-[10px] text-center text-muted-foreground/70">
-                        Drag to rate, release to save
-                    </p>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* Numeric readout + tier label */}
             <div className={cn('flex flex-col items-center gap-0.5 min-h-[2.75rem]', readoutClassName)}>
