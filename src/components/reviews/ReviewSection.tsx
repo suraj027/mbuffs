@@ -11,7 +11,7 @@ import {
     updateCommentApi,
     upsertRatingApi,
 } from '@/lib/api';
-import type { PaginatedCommentsResponse, ReviewComment } from '@/lib/types';
+import type { PaginatedCommentsResponse, ReviewComment, ReviewSummaryResponse } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
@@ -49,17 +49,18 @@ const STAR_SIZE = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-6 w-6' } as const;
 
 /** Rating tier — maps a 1–10 rating to a descriptive label and color scheme. */
 function getRatingTier(rating: number) {
-    if (rating <= 2) return { label: 'Skip It', color: 'text-red-400', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/20' };
-    if (rating <= 4) return { label: 'Meh', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/20' };
-    if (rating <= 6) return { label: 'Decent', color: 'text-yellow-400', bgColor: 'bg-yellow-500/10', borderColor: 'border-yellow-500/20' };
-    if (rating <= 8) return { label: 'Must Watch', color: 'text-emerald-400', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20' };
-    return { label: 'Masterpiece', color: 'text-amber-300', bgColor: 'bg-amber-400/15', borderColor: 'border-amber-400/25' };
+    if (rating <= 2) return { label: 'Skip It', color: 'text-red-400', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/20', starColor: 'fill-red-400 text-red-400', starHoverColor: 'fill-red-300 text-red-300' };
+    if (rating <= 4) return { label: 'Meh', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/20', starColor: 'fill-orange-400 text-orange-400', starHoverColor: 'fill-orange-300 text-orange-300' };
+    if (rating <= 6) return { label: 'Decent', color: 'text-emerald-400', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20', starColor: 'fill-emerald-400 text-emerald-400', starHoverColor: 'fill-emerald-300 text-emerald-300' };
+    if (rating <= 8) return { label: 'Must Watch', color: 'text-violet-400', bgColor: 'bg-violet-500/10', borderColor: 'border-violet-500/20', starColor: 'fill-violet-400 text-violet-400', starHoverColor: 'fill-violet-300 text-violet-300' };
+    return { label: 'Masterpiece', color: 'text-amber-300', bgColor: 'bg-amber-400/15', borderColor: 'border-amber-400/25', starColor: 'fill-amber-400 text-amber-400', starHoverColor: 'fill-amber-300 text-amber-300' };
 }
 
 /** Read-only fractional star display, maps a 1–10 rating to 5 visual stars. */
 function StarDisplay({ rating, max = 10, size = 'sm', className }: { rating: number; max?: number; size?: 'sm' | 'md' | 'lg'; className?: string }) {
     const normalized = (rating / max) * 5;
     const px = STAR_SIZE[size];
+    const tier = getRatingTier(rating);
     return (
         <div className={cn('flex items-center gap-0.5', className)} aria-label={`${rating} out of ${max}`}>
             {Array.from({ length: 5 }, (_, i) => {
@@ -71,7 +72,7 @@ function StarDisplay({ rating, max = 10, size = 'sm', className }: { rating: num
                             className="absolute inset-0 overflow-hidden"
                             style={{ width: `${fill * 100}%` }}
                         >
-                            <Star className={cn('fill-amber-400 text-amber-400', px)} />
+                            <Star className={cn(tier.starColor, px)} />
                         </div>
                     </div>
                 );
@@ -103,6 +104,7 @@ function InteractiveStarRating({
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const activeRating = hoverRating ?? value ?? 0;
     const filledStars = activeRating / 2;
+    const activeTier = activeRating > 0 ? getRatingTier(activeRating) : null;
 
     return (
         <div className={cn('flex flex-col items-center gap-1.5', disabled && 'pointer-events-none opacity-50', className)}>
@@ -127,8 +129,8 @@ function InteractiveStarRating({
                                         starSize,
                                         'transition-colors duration-100',
                                         hoverRating !== null
-                                            ? 'fill-amber-300 text-amber-300'
-                                            : 'fill-amber-400 text-amber-400'
+                                            ? activeTier?.starHoverColor ?? 'fill-amber-300 text-amber-300'
+                                            : activeTier?.starColor ?? 'fill-amber-400 text-amber-400'
                                     )}
                                 />
                             </div>
@@ -155,7 +157,7 @@ function InteractiveStarRating({
                         'text-sm font-semibold tabular-nums transition-all duration-150',
                         activeRating > 0
                             ? hoverRating !== null
-                                ? 'text-amber-400'
+                                ? activeTier?.color ?? 'text-amber-400'
                                 : 'text-foreground'
                             : 'text-muted-foreground/50'
                     )}
@@ -353,11 +355,56 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
 
     const rateMutation = useMutation({
         mutationFn: (rating: number) => upsertRatingApi(mediaType, tmdbId, rating),
-        onSuccess: () => {
-            refreshReviews();
-            toast.success('Rating saved');
+        onMutate: async (nextRating) => {
+            await queryClient.cancelQueries({ queryKey: summaryQueryKey });
+
+            const previousSummary = queryClient.getQueryData<ReviewSummaryResponse>(summaryQueryKey);
+            if (!previousSummary) {
+                return { previousSummary };
+            }
+
+            const previousUserRating = previousSummary.userRating;
+            const previousRatingsCount = previousSummary.summary.ratingsCount;
+            const previousAverageRating = previousSummary.summary.averageRating ?? 0;
+
+            const nextRatingsCount = previousUserRating == null
+                ? previousRatingsCount + 1
+                : previousRatingsCount;
+
+            const baseTotalScore = previousAverageRating * previousRatingsCount;
+            const adjustedTotalScore = previousUserRating == null
+                ? baseTotalScore + nextRating
+                : baseTotalScore - previousUserRating + nextRating;
+
+            const nextAverageRating = nextRatingsCount > 0
+                ? Number((adjustedTotalScore / nextRatingsCount).toFixed(1))
+                : null;
+
+            queryClient.setQueryData<ReviewSummaryResponse>(summaryQueryKey, {
+                ...previousSummary,
+                userRating: nextRating,
+                summary: {
+                    ...previousSummary.summary,
+                    averageRating: nextAverageRating,
+                    ratingsCount: nextRatingsCount,
+                },
+            });
+
+            return { previousSummary };
         },
-        onError: (error: Error) => toast.error(error.message || 'Failed to save rating'),
+        onSuccess: (result) => {
+            queryClient.setQueryData<ReviewSummaryResponse>(summaryQueryKey, result.summary);
+        },
+        onError: (error: Error, _nextRating, context) => {
+            if (context?.previousSummary) {
+                queryClient.setQueryData(summaryQueryKey, context.previousSummary);
+            }
+
+            toast.error(error.message || 'Failed to save rating');
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: summaryQueryKey, refetchType: 'inactive' });
+        },
     });
 
     const createCommentMutation = useMutation({
@@ -899,17 +946,10 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                     <InteractiveStarRating
                                         value={summaryData?.userRating ?? null}
                                         onChange={(r) => rateMutation.mutate(r)}
-                                        disabled={rateMutation.isPending}
                                         starSize="h-6 w-6"
                                         className="items-center md:items-start"
                                         readoutClassName="items-center md:items-start"
                                     />
-                                    {rateMutation.isPending && (
-                                        <div className="flex items-center justify-center md:justify-start gap-1.5 text-xs text-muted-foreground">
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                            Saving...
-                                        </div>
-                                    )}
                                 </div>
                             </>
                         )}
