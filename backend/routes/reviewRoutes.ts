@@ -1,9 +1,12 @@
 import express, { RequestHandler } from 'express';
 import {
     createComment,
+    createReply,
     deleteComment,
     getComments,
     getReviewSummary,
+    likeComment,
+    unlikeComment,
     updateComment,
     upsertRating,
 } from '../controllers/reviewController.js';
@@ -23,6 +26,12 @@ const commentWriteLimiter = createRateLimit({
     windowMs: 60 * 1000,
     maxRequests: 10,
     keyPrefix: 'comments-write',
+});
+
+const commentLikeLimiter = createRateLimit({
+    windowMs: 60 * 1000,
+    maxRequests: 40,
+    keyPrefix: 'comments-like',
 });
 
 // Public read endpoints
@@ -52,6 +61,30 @@ router.patch(
     requireTrustedOrigin as RequestHandler,
     commentWriteLimiter as RequestHandler,
     updateComment as RequestHandler
+);
+
+router.post(
+    '/comments/:commentId/replies',
+    requireAuth as RequestHandler,
+    requireTrustedOrigin as RequestHandler,
+    commentWriteLimiter as RequestHandler,
+    createReply as RequestHandler
+);
+
+router.put(
+    '/comments/:commentId/likes',
+    requireAuth as RequestHandler,
+    requireTrustedOrigin as RequestHandler,
+    commentLikeLimiter as RequestHandler,
+    likeComment as RequestHandler
+);
+
+router.delete(
+    '/comments/:commentId/likes',
+    requireAuth as RequestHandler,
+    requireTrustedOrigin as RequestHandler,
+    commentLikeLimiter as RequestHandler,
+    unlikeComment as RequestHandler
 );
 
 router.delete(

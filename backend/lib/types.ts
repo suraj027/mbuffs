@@ -138,12 +138,25 @@ export interface ReviewComment {
     id: string;
     mediaType: MediaType;
     tmdbId: number;
+    parentCommentId: string | null;
+    replyToCommentId: string | null;
+    replyToAuthorName: string | null;
     comment: string;
     createdAt: string;
     updatedAt: string;
     isEdited: boolean;
+    likesCount: number;
+    likedByViewer: boolean;
+    repliesCount: number;
+    replies: ReviewComment[];
     author: ReviewCommentAuthor;
     isOwner: boolean;
+}
+
+export interface CommentLikeResponse {
+    commentId: string;
+    likesCount: number;
+    likedByViewer: boolean;
 }
 
 export interface PaginatedCommentsResponse {

@@ -112,6 +112,90 @@ test('keeps one rating per user per media via upsert constraint', async () => {
     expect(summary.body.userRating).toBe(9);
 });
 
+test('supports replies and likes on review comments', async () => {
+    const rootCommentResponse = await authed(
+        request(app)
+            .post(`/api/reviews/${mediaType}/${tmdbId}/comments`)
+            .send({ comment: `Root comment ${Date.now()}` }),
+        ownerUser
+    );
+
+    expect(rootCommentResponse.status).toBe(201);
+    const rootCommentId = rootCommentResponse.body.comment.id as string;
+
+    const replyResponse = await authed(
+        request(app)
+            .post(`/api/reviews/comments/${rootCommentId}/replies`)
+            .send({ comment: `Reply comment ${Date.now()}` }),
+        otherUser
+    );
+
+    expect(replyResponse.status).toBe(201);
+    expect(replyResponse.body.comment.parentCommentId).toBe(rootCommentId);
+    expect(replyResponse.body.comment.replyToCommentId).toBe(rootCommentId);
+
+    const nestedReplyResponse = await authed(
+        request(app)
+            .post(`/api/reviews/comments/${replyResponse.body.comment.id}/replies`)
+            .send({ comment: `Nested reply ${Date.now()}` }),
+        adminUser
+    );
+
+    expect(nestedReplyResponse.status).toBe(201);
+    expect(nestedReplyResponse.body.comment.parentCommentId).toBe(rootCommentId);
+    expect(nestedReplyResponse.body.comment.replyToCommentId).toBe(replyResponse.body.comment.id);
+
+    const likeRoot = await authed(
+        request(app).put(`/api/reviews/comments/${rootCommentId}/likes`),
+        ownerUser
+    );
+
+    expect(likeRoot.status).toBe(200);
+    expect(likeRoot.body.likesCount).toBe(1);
+    expect(likeRoot.body.likedByViewer).toBe(true);
+
+    const likeReply = await authed(
+        request(app).put(`/api/reviews/comments/${replyResponse.body.comment.id}/likes`),
+        ownerUser
+    );
+
+    expect(likeReply.status).toBe(200);
+    expect(likeReply.body.likesCount).toBe(1);
+
+    const commentsList = await authed(
+        request(app).get(`/api/reviews/${mediaType}/${tmdbId}/comments?limit=20`),
+        ownerUser
+    );
+
+    expect(commentsList.status).toBe(200);
+
+    const root = commentsList.body.comments.find((comment: { id: string }) => comment.id === rootCommentId);
+    expect(root).toBeTruthy();
+    expect(root.likesCount).toBe(1);
+    expect(root.likedByViewer).toBe(true);
+    expect(root.repliesCount).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(root.replies)).toBe(true);
+    expect(root.replies.length).toBeGreaterThanOrEqual(2);
+
+    const reply = root.replies.find((item: { id: string }) => item.id === replyResponse.body.comment.id);
+    expect(reply).toBeTruthy();
+    expect(reply.likesCount).toBe(1);
+    expect(reply.likedByViewer).toBe(true);
+
+    const nestedReply = root.replies.find((item: { id: string }) => item.id === nestedReplyResponse.body.comment.id);
+    expect(nestedReply).toBeTruthy();
+    expect(nestedReply.replyToCommentId).toBe(replyResponse.body.comment.id);
+
+    const unlikeRoot = await authed(
+        request(app).delete(`/api/reviews/comments/${rootCommentId}/likes`),
+        ownerUser
+    );
+
+    expect(unlikeRoot.status).toBe(200);
+    expect(unlikeRoot.body.likesCount).toBe(0);
+    expect(unlikeRoot.body.likedByViewer).toBe(false);
+});
+
 test('enforces comment ownership and allows admin moderation delete', async () => {
     const createResponse = await authed(
         request(app)

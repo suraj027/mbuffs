@@ -74,6 +74,18 @@ export const createCommentSchema = z.object({
 
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
 
+export const commentIdParamSchema = z.object({
+  commentId: z.string().trim().min(1).max(128),
+});
+
+export type CommentIdParamInput = z.infer<typeof commentIdParamSchema>;
+
+export const createReplySchema = z.object({
+  comment: z.string().trim().min(1).max(2000),
+});
+
+export type CreateReplyInput = z.infer<typeof createReplySchema>;
+
 export const updateCommentSchema = z.object({
   comment: z.string().trim().min(1).max(2000),
 });

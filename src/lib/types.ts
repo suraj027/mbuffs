@@ -520,10 +520,17 @@ export interface ReviewComment {
   id: string;
   mediaType: 'movie' | 'tv';
   tmdbId: number;
+  parentCommentId: string | null;
+  replyToCommentId: string | null;
+  replyToAuthorName: string | null;
   comment: string;
   createdAt: string;
   updatedAt: string;
   isEdited: boolean;
+  likesCount: number;
+  likedByViewer: boolean;
+  repliesCount: number;
+  replies: ReviewComment[];
   author: {
     id: string;
     name: string | null;

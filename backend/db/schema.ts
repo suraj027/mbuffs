@@ -329,13 +329,15 @@ export const mediaRatings = pgTable("media_ratings", {
 
 // ============================================================================
 // MEDIA COMMENTS TABLE
-// Non-threaded v1 comments. Soft-delete ready.
+// Threaded comments (single reply level). Soft-delete ready.
 // ============================================================================
 export const mediaComments = pgTable("media_comments", {
 	id: text().primaryKey().notNull(),
 	userId: text("user_id").notNull(),
 	mediaType: text("media_type").notNull(), // 'movie' | 'tv'
 	tmdbId: integer("tmdb_id").notNull(),
+	parentCommentId: text("parent_comment_id"),
+	replyToCommentId: text("reply_to_comment_id"),
 	comment: text().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -349,13 +351,50 @@ export const mediaComments = pgTable("media_comments", {
 		name: "media_comments_user_id_fkey"
 	}).onDelete("cascade"),
 	foreignKey({
+		columns: [table.parentCommentId],
+		foreignColumns: [table.id],
+		name: "media_comments_parent_comment_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.replyToCommentId],
+		foreignColumns: [table.id],
+		name: "media_comments_reply_to_comment_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
 		columns: [table.deletedByUserId],
 		foreignColumns: [user.id],
 		name: "media_comments_deleted_by_user_id_fkey"
 	}).onDelete("set null"),
 	index("idx_media_comments_media_created_desc").using("btree", table.mediaType.asc().nullsLast().op("text_ops"), table.tmdbId.asc().nullsLast(), table.createdAt.desc().nullsLast(), table.id.desc().nullsLast().op("text_ops")),
+	index("idx_media_comments_parent_comment_id").using("btree", table.parentCommentId.asc().nullsLast().op("text_ops")),
+	index("idx_media_comments_reply_to_comment_id").using("btree", table.replyToCommentId.asc().nullsLast().op("text_ops")),
 	index("idx_media_comments_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
 	index("idx_media_comments_deleted_at").using("btree", table.deletedAt.asc().nullsLast()),
 	check("media_comments_media_type_check", sql`${table.mediaType} IN ('movie', 'tv')`),
 	check("media_comments_comment_length_check", sql`char_length(btrim(${table.comment})) BETWEEN 1 AND 2000`),
+	check("media_comments_parent_not_self_check", sql`${table.parentCommentId} IS NULL OR ${table.parentCommentId} <> ${table.id}`),
+]);
+
+// ============================================================================
+// MEDIA COMMENT LIKES TABLE
+// ============================================================================
+export const mediaCommentLikes = pgTable("media_comment_likes", {
+	id: text().primaryKey().notNull(),
+	commentId: text("comment_id").notNull(),
+	userId: text("user_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.commentId],
+		foreignColumns: [mediaComments.id],
+		name: "media_comment_likes_comment_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [user.id],
+		name: "media_comment_likes_user_id_fkey"
+	}).onDelete("cascade"),
+	index("idx_media_comment_likes_comment_id").using("btree", table.commentId.asc().nullsLast().op("text_ops")),
+	index("idx_media_comment_likes_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+	unique("media_comment_likes_comment_user_unique").on(table.commentId, table.userId),
 ]);

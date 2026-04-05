@@ -916,6 +916,32 @@ export const updateCommentApi = async (
     });
 };
 
+export const createReplyApi = async (
+    commentId: string,
+    comment: string
+): Promise<{ comment: ReviewComment }> => {
+    return fetchBackend(`/reviews/comments/${commentId}/replies`, {
+        method: 'POST',
+        body: JSON.stringify({ comment }),
+    });
+};
+
+export const likeCommentApi = async (
+    commentId: string
+): Promise<{ commentId: string; likesCount: number; likedByViewer: boolean }> => {
+    return fetchBackend(`/reviews/comments/${commentId}/likes`, {
+        method: 'PUT',
+    });
+};
+
+export const unlikeCommentApi = async (
+    commentId: string
+): Promise<{ commentId: string; likesCount: number; likedByViewer: boolean }> => {
+    return fetchBackend(`/reviews/comments/${commentId}/likes`, {
+        method: 'DELETE',
+    });
+};
+
 export const deleteCommentApi = async (
     commentId: string,
     reason?: string
