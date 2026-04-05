@@ -44,6 +44,15 @@ function starFillFraction(filledStars: number, index: number): number {
 
 const STAR_SIZE = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-6 w-6' } as const;
 
+/** Rating tier — maps a 1–10 rating to a descriptive label and color scheme. */
+function getRatingTier(rating: number) {
+    if (rating <= 2) return { label: 'Skip It', color: 'text-red-400', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/20' };
+    if (rating <= 4) return { label: 'Meh', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/20' };
+    if (rating <= 6) return { label: 'Decent', color: 'text-yellow-400', bgColor: 'bg-yellow-500/10', borderColor: 'border-yellow-500/20' };
+    if (rating <= 8) return { label: 'Must Watch', color: 'text-emerald-400', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20' };
+    return { label: 'Masterpiece', color: 'text-amber-300', bgColor: 'bg-amber-400/15', borderColor: 'border-amber-400/25' };
+}
+
 /** Read-only fractional star display, maps a 1–10 rating to 5 visual stars. */
 function StarDisplay({ rating, max = 10, size = 'sm', className }: { rating: number; max?: number; size?: 'sm' | 'md' | 'lg'; className?: string }) {
     const normalized = (rating / max) * 5;
@@ -132,19 +141,33 @@ function InteractiveStarRating({
                 })}
             </div>
 
-            {/* Numeric readout — below stars so they stay centered */}
-            <span
-                className={cn(
-                    'text-sm font-semibold tabular-nums transition-all duration-150 h-5',
-                    activeRating > 0
-                        ? hoverRating !== null
-                            ? 'text-amber-400'
-                            : 'text-foreground/70'
-                        : 'text-muted-foreground/30'
-                )}
-            >
-                {activeRating > 0 ? `${activeRating}/10` : '\u00A0'}
-            </span>
+            {/* Numeric readout + tier label */}
+            <div className="flex flex-col items-center gap-0.5 min-h-[2.75rem]">
+                <span
+                    className={cn(
+                        'text-sm font-semibold tabular-nums transition-all duration-150',
+                        activeRating > 0
+                            ? hoverRating !== null
+                                ? 'text-amber-400'
+                                : 'text-foreground'
+                            : 'text-muted-foreground/50'
+                    )}
+                >
+                    {activeRating > 0 ? `${activeRating}/10` : '\u00A0'}
+                </span>
+                {activeRating > 0 && (() => {
+                    const tier = getRatingTier(activeRating);
+                    return (
+                        <span className={cn(
+                            'text-[11px] font-medium transition-all duration-150',
+                            tier.color,
+                            hoverRating !== null ? 'opacity-80' : ''
+                        )}>
+                            {tier.label}
+                        </span>
+                    );
+                })()}
+            </div>
         </div>
     );
 }
@@ -283,7 +306,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
         <section className="space-y-5">
             {/* ────────── Section heading ────────── */}
             <div className="flex items-baseline gap-3">
-                <h2 className="text-xl md:text-2xl font-semibold text-foreground/90">
+                <h2 className="text-xl md:text-2xl font-semibold text-foreground">
                     Ratings & Reviews
                 </h2>
                 {!isLoadingSummary && (summaryData?.summary.commentsCount ?? 0) > 0 && (
@@ -295,67 +318,75 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
             </div>
 
             {/* ────────── Ratings card — vertically stacked ────────── */}
-            <div className="rounded-xl border border-border/60 overflow-hidden bg-card/40">
-                {/* ── mbuff score (hero) ── */}
-                <div className="px-5 pt-5 pb-4 md:px-6 md:pt-6 flex flex-col items-center text-center gap-1.5">
-                    <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-[0.15em]">
-                        mbuff score
-                    </span>
-                    <div className="flex items-baseline gap-1">
-                        <span className="text-5xl md:text-6xl font-extrabold tabular-nums tracking-tighter leading-none">
-                            {summaryData?.summary.averageRating ?? '—'}
-                        </span>
-                        <span className="text-base text-muted-foreground/40 font-semibold">
-                            /10
-                        </span>
-                    </div>
-                    {summaryData?.summary.averageRating != null ? (
-                        <StarDisplay rating={summaryData.summary.averageRating} size="md" />
-                    ) : (
-                        <StarDisplay rating={0} size="md" />
-                    )}
-                    <span className="text-xs text-muted-foreground/60">
-                        {summaryData?.summary.ratingsCount ?? 0}{' '}
-                        {(summaryData?.summary.ratingsCount ?? 0) === 1 ? 'rating' : 'ratings'}
-                    </span>
-                </div>
+            {(isLoggedIn || (summaryData?.summary.ratingsCount ?? 0) > 0) && <div className="rounded-xl border border-border/60 overflow-hidden bg-card/40">
+                {/* ── mbuff score (hero) — only shown when there's at least one rating ── */}
+                {(summaryData?.summary.ratingsCount ?? 0) > 0 && (
+                    <>
+                        <div className="px-5 pt-6 pb-5 md:px-8 md:pt-8 md:pb-6 flex flex-col items-center text-center gap-2">
+                            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-[0.2em]">
+                                mbuff score
+                            </span>
+                            <div className="flex items-baseline gap-1.5">
+                                <span className={cn(
+                                    'text-5xl md:text-6xl font-extrabold tabular-nums tracking-tighter leading-none transition-colors',
+                                    summaryData?.summary.averageRating != null
+                                        ? getRatingTier(summaryData.summary.averageRating).color
+                                        : 'text-muted-foreground/20'
+                                )}>
+                                    {summaryData?.summary.averageRating ?? '—'}
+                                </span>
+                                <span className="text-base text-muted-foreground/50 font-semibold">
+                                    /10
+                                </span>
+                            </div>
+                            {summaryData?.summary.averageRating != null && (() => {
+                                const tier = getRatingTier(summaryData.summary.averageRating);
+                                return (
+                                    <>
+                                        <StarDisplay rating={summaryData.summary.averageRating} size="md" />
+                                        <span className={cn(
+                                            'inline-flex items-center px-3 py-0.5 rounded-full text-[11px] font-semibold border',
+                                            tier.color, tier.bgColor, tier.borderColor,
+                                        )}>
+                                            {tier.label}
+                                        </span>
+                                    </>
+                                );
+                            })()}
+                            <span className="text-xs text-muted-foreground">
+                                {summaryData?.summary.ratingsCount ?? 0}{' '}
+                                {(summaryData?.summary.ratingsCount ?? 0) === 1 ? 'rating' : 'ratings'}
+                            </span>
+                        </div>
 
-                {/* ── Divider ── */}
-                <div className="mx-5 md:mx-6">
-                    <Separator className="opacity-40" />
-                </div>
+                        {/* ── Divider ── */}
+                        <div className="mx-5 md:mx-6">
+                            <Separator className="opacity-40" />
+                        </div>
+                    </>
+                )}
 
                 {/* ── Your rating (compact) ── */}
-                <div className="px-5 py-3.5 pb-4 md:px-6 flex flex-col items-center text-center gap-1">
-                    <span className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-[0.12em]">
-                        {isLoggedIn ? 'Your Rating' : 'Rate This'}
-                    </span>
-
-                    {isLoggedIn ? (
-                        <>
-                            <InteractiveStarRating
-                                value={summaryData?.userRating ?? null}
-                                onChange={(r) => rateMutation.mutate(r)}
-                                disabled={rateMutation.isPending}
-                                starSize="h-6 w-6"
-                            />
-                            {rateMutation.isPending && (
-                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    Saving...
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        <>
-                            <StarDisplay rating={0} size="lg" className="opacity-30" />
-                            <p className="text-xs text-muted-foreground">
-                                Sign in to rate and review
-                            </p>
-                        </>
-                    )}
-                </div>
-            </div>
+                {isLoggedIn && (
+                    <div className="px-5 py-3.5 pb-4 md:px-6 flex flex-col items-center text-center gap-1">
+                        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.12em]">
+                            Your Rating
+                        </span>
+                        <InteractiveStarRating
+                            value={summaryData?.userRating ?? null}
+                            onChange={(r) => rateMutation.mutate(r)}
+                            disabled={rateMutation.isPending}
+                            starSize="h-6 w-6"
+                        />
+                        {rateMutation.isPending && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Saving...
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>}
 
             {/* ────────── Comment composer ────────── */}
             {isLoggedIn && (
@@ -382,7 +413,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                 maxLength={2000}
                                 rows={showComposerActions ? 3 : 1}
                                 className={cn(
-                                    'w-full bg-transparent text-sm text-foreground/90 placeholder:text-muted-foreground/40',
+                                    'w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60',
                                     'resize-none outline-none leading-relaxed',
                                     'transition-all duration-200',
                                     showComposerActions ? 'min-h-[4.5rem]' : 'min-h-0'
@@ -402,11 +433,11 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                     {/* Composer footer — char count + post button */}
                     {showComposerActions && (
                         <div className="flex items-center justify-between px-3 pb-3 md:px-4 md:pb-4 pt-0">
-                            <span className="text-[11px] tabular-nums text-muted-foreground/30">
+                            <span className="text-[11px] tabular-nums text-muted-foreground/50">
                                 {draftComment.length > 0 && `${draftComment.length}/2000`}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className="text-[11px] text-muted-foreground/30 hidden sm:inline">
+                                <span className="text-[11px] text-muted-foreground/50 hidden sm:inline">
                                     {navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+Enter
                                 </span>
                                 <Button
@@ -435,7 +466,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
 
             {/* ────────── Comments feed ────────── */}
             {comments.length > 0 && (
-                <div className="space-y-0">
+                <div className="rounded-xl border border-border/60 bg-card/40 px-4 md:px-5">
                     {comments.map((comment: ReviewComment, index: number) => {
                         const isEditing = editingState?.commentId === comment.id;
                         const canEditOrDelete = comment.isOwner || canModerate;
@@ -459,10 +490,10 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                         {/* Comment header */}
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="flex items-center gap-2 text-sm flex-wrap">
-                                                <span className="font-medium text-foreground/90 text-[13px]">
+                                                <span className="font-medium text-foreground text-[13px]">
                                                     {comment.author.name ?? 'Anonymous'}
                                                 </span>
-                                                <span className="flex items-center gap-1.5 text-muted-foreground/40">
+                                                <span className="flex items-center gap-1.5 text-muted-foreground/60">
                                                     <span className="text-[3px] leading-none">&#9679;</span>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
@@ -492,7 +523,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                         <Button
                                                             variant="ghost"
                                                             size="icon-xs"
-                                                            className="text-muted-foreground/30 hover:text-foreground shrink-0 -mr-1"
+                                                            className="text-muted-foreground/50 hover:text-foreground shrink-0 -mr-1"
                                                         >
                                                             <MoreHorizontal className="h-3.5 w-3.5" />
                                                         </Button>
@@ -531,7 +562,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                     onChange={(e) => setEditingState((prev) => prev ? { ...prev, draft: e.target.value } : prev)}
                                                     maxLength={2000}
                                                     rows={3}
-                                                    className="w-full bg-card/50 text-sm text-foreground/90 resize-none outline-none rounded-lg border border-border/60 px-3 py-2 focus:border-border/80 focus:ring-1 focus:ring-border/30 transition-all"
+                                                    className="w-full bg-card/50 text-sm text-foreground resize-none outline-none rounded-lg border border-border/60 px-3 py-2 focus:border-border/80 focus:ring-1 focus:ring-border/30 transition-all"
                                                     autoFocus
                                                 />
                                                 <div className="flex items-center justify-end gap-2">
@@ -563,7 +594,7 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <p className="text-sm text-foreground/70 whitespace-pre-wrap leading-relaxed">
+                                            <p className="text-sm text-foreground/85 whitespace-pre-wrap leading-relaxed">
                                                 {comment.comment}
                                             </p>
                                         )}
@@ -586,10 +617,10 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
             {comments.length === 0 && !commentsQuery.isLoading && (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
                     <div className="rounded-full bg-muted/30 p-3.5 mb-3">
-                        <MessageSquare className="h-5 w-5 text-muted-foreground/40 stroke-[1.5]" />
+                        <MessageSquare className="h-5 w-5 text-muted-foreground/60 stroke-[1.5]" />
                     </div>
-                    <p className="text-sm font-medium text-foreground/60">No reviews yet</p>
-                    <p className="text-xs text-muted-foreground/50 mt-1">
+                    <p className="text-sm font-medium text-foreground/80">No reviews yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
                         Be the first to share your thoughts
                     </p>
                 </div>
