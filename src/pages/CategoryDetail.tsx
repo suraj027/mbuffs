@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
+import { getPreferencesQueryKey } from "@/lib/recommendationQueries";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -31,7 +32,7 @@ const CategoryDetail = () => {
 
   // Fetch user preferences to check if personalization is enabled
   const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
-    queryKey: ['user', 'preferences'],
+    queryKey: getPreferencesQueryKey(user?.id),
     queryFn: fetchUserPreferencesApi,
     enabled: !!user,
     staleTime: 1000 * 60 * 5,

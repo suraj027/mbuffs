@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useRef, useMemo } from 'react';
 import { MovieGrid } from "@/components/MovieGrid";
 import { MovieCard } from "@/components/MovieCard";
-import { fetchTrendingContentApi, fetchUserRegion, fetchRecommendationsApi, fetchUserPreferencesApi } from "@/lib/api";
+import { fetchTrendingContentApi, fetchUserRegion, fetchUserPreferencesApi } from "@/lib/api";
 import { Navbar } from "@/components/Navbar";
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,17 +12,15 @@ import { Sparkles, Settings, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { UserPreferences } from '@/lib/types';
+import { getForYouInfiniteQueryOptions, getPreferencesQueryKey } from '@/lib/recommendationQueries';
 
 const TRENDING_CONTENT_QUERY_KEY = ['content', 'trending'];
-const RECOMMENDATIONS_QUERY_KEY = ['recommendations'];
-const PREFERENCES_QUERY_KEY = ['user', 'preferences'];
-
 const Index = () => {
   const { user, isLoadingUser } = useAuth();
   
   // Fetch user preferences separately
   const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
-    queryKey: PREFERENCES_QUERY_KEY,
+    queryKey: getPreferencesQueryKey(user?.id),
     queryFn: fetchUserPreferencesApi,
     enabled: !!user,
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
@@ -50,15 +48,17 @@ const Index = () => {
   const {
     data: recommendationsData,
     isLoading: isRecommendationsLoading,
-  } = useQuery({
-    queryKey: RECOMMENDATIONS_QUERY_KEY,
-    queryFn: () => fetchRecommendationsApi(20),
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  } = useInfiniteQuery({
+    ...getForYouInfiniteQueryOptions(user?.id),
     enabled: !!user && recommendationsEnabled,
   });
 
   const trendingContent = trendingContentData?.results?.slice(0, 50) || [];
-  const recommendations = recommendationsData?.results || [];
+  const firstRecommendationsPage = recommendationsData?.pages?.[0];
+  const recommendations = useMemo(
+    () => firstRecommendationsPage?.results ?? [],
+    [firstRecommendationsPage]
+  );
   const hasRecommendations = recommendationsEnabled && recommendations.length > 0;
 
   // Generate media IDs for watched status lookup (recommendations only)
@@ -151,8 +151,8 @@ const Index = () => {
                     </Link>
                   </div>
                   <p className="text-sm text-muted-foreground -mt-1">
-                    {(recommendationsData?.totalSourceItems || 0) > 0
-                      ? `Based on ${recommendationsData?.totalSourceItems || 0} items from ${recommendationsData?.sourceCollections?.length || 0} collection${(recommendationsData?.sourceCollections?.length || 0) !== 1 ? 's' : ''}`
+                    {(firstRecommendationsPage?.totalSourceItems || 0) > 0
+                      ? `Based on ${firstRecommendationsPage?.totalSourceItems || 0} items from ${firstRecommendationsPage?.sourceCollections?.length || 0} collection${(firstRecommendationsPage?.sourceCollections?.length || 0) !== 1 ? 's' : ''}`
                       : 'Add source collections to personalize your recommendations'}
                   </p>
                   <div className="relative -mx-4">
