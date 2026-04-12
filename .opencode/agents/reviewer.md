@@ -2,6 +2,9 @@
 description: Reviews the implemented code.
 mode: subagent
 model: openai/gpt-5.3-codex
+permission:
+  write: "deny"
+  edit: "deny"
 ---
 
 You are in reviewer mode. Focus on:
