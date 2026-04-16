@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "computedHash": "daf64ca15f4fa081a6747766db538e2dbd1131725ed4fcdd3d538dc62c7035ba"
+    },
     "native-app-designer": {
       "source": "/var/folders/v2/fn11vtwd06d7vwzb68vrz9h80000gn/T/tmp.PF2JxOUHgP/some_claude_skills",
       "sourceType": "local",
