@@ -11,6 +11,7 @@
  */
 
 import { neon } from '@neondatabase/serverless';
+import { Codex } from '@openai/codex-sdk';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -51,6 +52,7 @@ const DEFAULT_SUBREDDITS = [
     'AskReddit', // For "What movie should I watch?" threads
     'CineSeries',
     'televisionsuggestions', // TV recommendations
+    'a24',
 ];
 
 // Parse subreddits from env or use defaults
@@ -141,51 +143,41 @@ async function fetchRedditJson(url, retryCount = 0) {
 }
 
 // ============================================================================
-// AI-POWERED MOVIE EXTRACTION (OpenRouter)
+// AI-POWERED MOVIE EXTRACTION (Codex SDK)
 // ============================================================================
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const AI_MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-oss-120b:free';
+// Authentication: the Codex SDK inherits the CLI's credentials from ~/.codex,
+// so the user must run `codex login` once (ChatGPT subscription) before running this script.
+const CODEX_MODEL = process.env.CODEX_MODEL;
 
-// Retry configuration for rate limits
-const MAX_RETRIES = 3;
-const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+const codex = new Codex();
 
-/**
- * Make an API call with retry logic for rate limits
- */
-async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-        const response = await fetch(url, options);
-        
-        if (response.ok) {
-            return response;
-        }
-        
-        // Handle rate limiting (429)
-        if (response.status === 429 && attempt < retries) {
-            const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt); // Exponential backoff
-            console.warn(`  Rate limited, waiting ${delay/1000}s before retry ${attempt + 1}/${retries}...`);
-            await sleep(delay);
-            continue;
-        }
-        
-        // For other errors or final retry, return the response as-is
-        return response;
-    }
-}
+const MOVIE_EXTRACTION_SCHEMA = {
+    type: 'object',
+    properties: {
+        movies: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string' },
+                    year: { type: ['number', 'null'] },
+                    sentiment: { type: 'string', enum: ['positive', 'negative', 'neutral'] },
+                },
+                required: ['title', 'year', 'sentiment'],
+                additionalProperties: false,
+            },
+        },
+    },
+    required: ['movies'],
+    additionalProperties: false,
+};
 
 /**
- * Use AI to extract movie/show names from text
- * Returns array of { title, year?, sentiment }
+ * Use Codex to extract movie/show names from text
+ * Returns array of { title, year, sentiment }
  */
 async function extractMoviesWithAI(texts) {
-    if (!OPENROUTER_API_KEY) {
-        console.warn('  OPENROUTER_API_KEY not set, skipping AI extraction');
-        return [];
-    }
-
-    // Combine texts and truncate to avoid token limits
     const combinedText = texts
         .map(t => t.text.substring(0, 500))
         .join('\n---\n')
@@ -195,94 +187,52 @@ async function extractMoviesWithAI(texts) {
         return [];
     }
 
-    const prompt = `Extract all movie and TV show titles mentioned in the following Reddit posts/comments. 
+    const prompt = `Extract all movie and TV show titles mentioned in the following Reddit posts/comments.
 These are from movie recommendation subreddits, so users are recommending films to watch.
 
-For each title found, provide:
+For each title found, return:
 - title: The exact movie/show name
-- year: Release year if mentioned (optional)
+- year: Release year if mentioned, otherwise null
 - sentiment: "positive" if recommended/praised, "negative" if criticized, "neutral" otherwise
 
-Return ONLY a JSON array, no other text. Example:
-[{"title": "The Shawshank Redemption", "year": 1994, "sentiment": "positive"}, {"title": "Inception", "sentiment": "neutral"}]
-
-If no movies/shows are found, return an empty array: []
+If no titles are found, return an empty movies array.
 
 Text to analyze:
 ${combinedText}`;
 
+    const threadOptions = {
+        sandboxMode: 'read-only',
+        approvalPolicy: 'never',
+        skipGitRepoCheck: true,
+        networkAccessEnabled: false,
+        webSearchEnabled: false,
+    };
+    if (CODEX_MODEL) {
+        threadOptions.model = CODEX_MODEL;
+    }
+
     try {
-        const response = await fetchWithRetry('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': process.env.FRONTEND_URL || 'http://localhost:8080',
-                'X-Title': 'mbuffs',
-            },
-            body: JSON.stringify({
-                model: AI_MODEL,
-                messages: [
-                    {
-                        role: 'user',
-                        content: prompt,
-                    },
-                ],
-                temperature: 0.1,
-                max_tokens: 2000,
-            }),
-        });
+        const thread = codex.startThread(threadOptions);
+        const turn = await thread.run(prompt, { outputSchema: MOVIE_EXTRACTION_SCHEMA });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            // Only log if not a rate limit (we already logged retries)
-            if (response.status !== 429) {
-                console.error(`  OpenRouter API error: ${response.status} - ${errorText}`);
-            }
+        const raw = (turn.finalResponse || '').trim();
+        if (!raw) {
             return [];
         }
 
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        
-        if (!content.trim()) {
-            return [];
-        }
-        
-        // Parse JSON from response (handle markdown code blocks and other text)
-        let jsonStr = content.trim();
-        
-        // Remove markdown code blocks
-        if (jsonStr.includes('```')) {
-            jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-        }
-        
-        // Try to find JSON array in the response
-        const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
-        if (arrayMatch) {
-            jsonStr = arrayMatch[0];
-        } else {
-            // No array found
-            return [];
-        }
-        
-        // Clean up common JSON issues
-        jsonStr = jsonStr
-            .replace(/,\s*]/g, ']')  // Remove trailing commas
-            .replace(/,\s*}/g, '}'); // Remove trailing commas in objects
-        
-        const movies = JSON.parse(jsonStr);
-        
-        if (!Array.isArray(movies)) {
-            return [];
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            const match = raw.match(/\{[\s\S]*\}/);
+            if (!match) return [];
+            parsed = JSON.parse(match[0]);
         }
 
-        return movies.filter(m => m.title && typeof m.title === 'string');
+        const movies = Array.isArray(parsed?.movies) ? parsed.movies : [];
+        return movies.filter(m => m && typeof m.title === 'string' && m.title.trim());
     } catch (error) {
-        // Only log if it's not a simple parsing issue
-        if (!error.message.includes('JSON')) {
-            console.error(`  AI extraction error: ${error.message}`);
-        }
+        console.error(`  Codex extraction error: ${error.message}`);
         return [];
     }
 }
@@ -437,13 +387,8 @@ const POSTS_TO_FETCH_COMMENTS = 5;
 
 async function scrapeReddit() {
     console.log('Starting Reddit scrape...');
-    
-    if (!OPENROUTER_API_KEY) {
-        console.error('ERROR: OPENROUTER_API_KEY is required for AI-powered extraction');
-        console.error('Get a free API key at https://openrouter.ai/');
-        process.exit(1);
-    }
-    
+    console.log('  (Codex SDK will use credentials from `codex login`)');
+
     const allPosts = [];
     const allComments = [];
     let totalPostsScraped = 0;
@@ -535,7 +480,7 @@ async function scrapeReddit() {
             console.log(`    Batch ${batchNum}/${batches.length} - Found ${allMentions.size} unique movies so far`);
         }
         
-        await sleep(3500); // 3.5 seconds between calls (free tier: 20 req/min)
+        await sleep(1000); // small pause between Codex CLI invocations
     }
 
     console.log(`  AI extracted ${allMentions.size} unique movie/show titles`);

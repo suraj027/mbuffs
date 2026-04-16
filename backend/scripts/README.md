@@ -2,19 +2,21 @@
 
 ## Reddit Scraper
 
-Scrapes movie/TV show recommendations from Reddit using AI-powered extraction (OpenRouter) and validates against TMDB.
+Scrapes movie/TV show recommendations from Reddit using AI-powered extraction (OpenAI Codex SDK) and validates against TMDB.
 
 ### Setup
+
+The extractor uses [`@openai/codex-sdk`](https://github.com/openai/codex/tree/main/sdk/typescript), which wraps the `codex` CLI and inherits its credentials. Run `codex login` once with your ChatGPT/Codex subscription before running this script — no API key env var is needed.
 
 Add these environment variables to your `.env`:
 
 ```env
 # Required
-OPENROUTER_API_KEY=your_key_here   # Get free key at https://openrouter.ai/
 TMDB_API_KEY=your_tmdb_key         # For validating movie titles
 DATABASE_URL=your_neon_db_url      # For storing recommendations
 
 # Optional
+CODEX_MODEL=gpt-5-codex             # Override the model Codex uses for extraction
 REDDIT_SUBREDDITS=MovieSuggestions,movies,horror  # Comma-separated list (default: see below)
 REDDIT_POSTS_PER_SUB=25            # Posts to fetch per subreddit (default: 25)
 REDDIT_MIN_SCORE=10                # Minimum upvote score (default: 10)
@@ -52,7 +54,7 @@ node scripts/scrapeReddit.mjs --force
 ### How It Works
 
 1. **Fetch Reddit Data**: Gets top posts and comments from configured subreddits
-2. **AI Extraction**: Sends batched text to `z-ai/glm-4.5-air:free` model via OpenRouter to extract movie/show names
+2. **AI Extraction**: Sends batched text to the Codex agent (via `@openai/codex-sdk`) with a JSON output schema to extract movie/show names
 3. **TMDB Validation**: Validates each extracted title against TMDB API
 4. **Save to Database**: Stores validated recommendations with mention counts and sentiment
 
