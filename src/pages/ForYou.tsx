@@ -11,8 +11,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
-import { FOR_YOU_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getPreferencesQueryKey } from "@/lib/recommendationQueries";
+import { FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getPreferencesQueryKey } from "@/lib/recommendationQueries";
 
+const INITIAL_LOADING_SKELETON_COUNT = 24;
 const INFINITE_SCROLL_SKELETON_COUNT = 12;
 
 const ForYou = () => {
@@ -36,7 +37,7 @@ const ForYou = () => {
     hasNextPage,
     fetchNextPage,
   } = useInfiniteQuery({
-    ...getForYouInfiniteQueryOptions(user?.id),
+    ...getForYouInfiniteQueryOptions(user?.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE),
     enabled: !!user && recommendationsEnabled,
   });
 
@@ -64,7 +65,6 @@ const ForYou = () => {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const fetchLockRef = useRef(false);
   const fetchPromiseRef = useRef<Promise<unknown> | null>(null);
-  const hasPrefetchedNextPageRef = useRef(false);
 
   useEffect(() => {
     if (!isFetchingNextPage) {
@@ -120,22 +120,6 @@ const ForYou = () => {
 
     observerRef.current.observe(node);
   }, [isFetchingNextPage, hasNextPage, safeFetchNextPage]);
-
-  // Cleanup observer on unmount
-  useEffect(() => {
-    hasPrefetchedNextPageRef.current = false;
-  }, [user?.id, recommendationsEnabled]);
-
-  useEffect(() => {
-    if (!recommendationsEnabled) return;
-    if (!data?.pages?.length || data.pages.length !== 1) return;
-    if (!hasNextPage || isFetchingNextPage || hasPrefetchedNextPageRef.current) return;
-
-    hasPrefetchedNextPageRef.current = true;
-    void safeFetchNextPage().catch(() => {
-      hasPrefetchedNextPageRef.current = false;
-    });
-  }, [recommendationsEnabled, data?.pages?.length, hasNextPage, isFetchingNextPage, safeFetchNextPage]);
 
   useEffect(() => {
     return () => {
@@ -228,7 +212,7 @@ const ForYou = () => {
         {/* Grid */}
         {isLoading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-            {Array.from({ length: FOR_YOU_ITEMS_PER_PAGE }).map((_, index) => (
+            {Array.from({ length: INITIAL_LOADING_SKELETON_COUNT }).map((_, index) => (
               <div key={index} className="space-y-3">
                 <Skeleton className="aspect-[2/3] w-full rounded-xl" />
                 <Skeleton className="h-4 w-[75%] rounded-md" />

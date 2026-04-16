@@ -194,6 +194,8 @@ const recommendationCacheLocks = new Map<string, Promise<void>>();
 const REDDIT_BOOST_ENABLED = true;
 const REDDIT_BOOST_MULTIPLIER = 15; // Points per mention
 const REDDIT_POSITIVE_SENTIMENT_BONUS = 10;
+const MIN_THEATRICAL_TMDB_PAGES_TO_FETCH = 3;
+const MAX_THEATRICAL_TMDB_PAGES_TO_FETCH = 12;
 
 const WATCHED_COLLECTION_NAME = '__watched__';
 const NOT_INTERESTED_COLLECTION_NAME = '__not_interested__';
@@ -1798,7 +1800,7 @@ async function generateColdStartRecommendations(
  */
 export async function generateRecommendations(
     userId: string,
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<RecommendationResult> {
     const emptyResult: RecommendationResult = { 
@@ -2602,7 +2604,7 @@ export async function generateGenreRecommendations(
     userId: string,
     genreId: number,
     mediaType: 'movie' | 'tv' = 'movie',
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<{
     results: TMDBMovie[];
@@ -2896,7 +2898,7 @@ export async function generateGenreRecommendations(
  */
 export async function generatePersonalizedTheatricalReleases(
     userId: string,
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<{
     results: TMDBMovie[];
@@ -3038,7 +3040,11 @@ export async function generatePersonalizedTheatricalReleases(
 
     // Calculate how many TMDB pages we need to fetch
     const resultsNeeded = page * limit;
-    const tmdbPagesToFetch = Math.max(3, Math.ceil((resultsNeeded * 2) / 20));
+    const requestedTmdbPagesToFetch = Math.max(
+        MIN_THEATRICAL_TMDB_PAGES_TO_FETCH,
+        Math.ceil((resultsNeeded * 2) / 20)
+    );
+    const tmdbPagesToFetch = Math.min(requestedTmdbPagesToFetch, MAX_THEATRICAL_TMDB_PAGES_TO_FETCH);
 
     // Fetch now playing movies from TMDB (multiple pages)
     const pagePromises = Array.from({ length: tmdbPagesToFetch }, (_, i) => i + 1).map(async (tmdbPage) => {
@@ -3243,7 +3249,7 @@ export async function setRecommendationCollections(
 
 export async function generateRecommendationsCached(
     userId: string,
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<RecommendationResult> {
     return getCachedRecommendationResult(
@@ -3271,7 +3277,7 @@ export async function generateGenreRecommendationsCached(
     userId: string,
     genreId: number,
     mediaType: 'movie' | 'tv' = 'movie',
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<{
     results: TMDBMovie[];
@@ -3291,7 +3297,7 @@ export async function generateGenreRecommendationsCached(
 
 export async function generatePersonalizedTheatricalReleasesCached(
     userId: string,
-    limit: number = 20,
+    limit: number = 60,
     page: number = 1
 ): Promise<{
     results: TMDBMovie[];

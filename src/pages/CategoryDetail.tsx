@@ -22,7 +22,7 @@ import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
 import { getPreferencesQueryKey } from "@/lib/recommendationQueries";
 
-const ITEMS_PER_PAGE = 20;
+const PERSONALIZED_ITEMS_PER_PAGE = 60;
 
 const CategoryDetail = () => {
   const { mediaType, genreId } = useParams<{ mediaType: 'movie' | 'tv'; genreId: string }>();
@@ -63,12 +63,12 @@ const CategoryDetail = () => {
     hasNextPage: hasNextPagePersonalized,
     fetchNextPage: fetchNextPagePersonalized,
   } = useInfiniteQuery({
-    queryKey: ['recommendations', isTheatrical ? 'theatrical' : 'genre', isTheatrical ? 'all' : genreIdNum, mediaType, 'all'],
+    queryKey: ['recommendations', user?.id ?? null, isTheatrical ? 'theatrical' : 'genre', isTheatrical ? 'all' : genreIdNum, mediaType, 'all', PERSONALIZED_ITEMS_PER_PAGE],
     queryFn: ({ pageParam = 1 }) => {
       if (isTheatrical) {
-        return fetchTheatricalRecommendationsApi(ITEMS_PER_PAGE, pageParam);
+        return fetchTheatricalRecommendationsApi(PERSONALIZED_ITEMS_PER_PAGE, pageParam);
       }
-      return fetchGenreRecommendationsApi(genreIdNum, mediaType as 'movie' | 'tv', ITEMS_PER_PAGE, pageParam);
+      return fetchGenreRecommendationsApi(genreIdNum, mediaType as 'movie' | 'tv', PERSONALIZED_ITEMS_PER_PAGE, pageParam);
     },
     initialPageParam: 1,
     getNextPageParam: (lastPage) => {

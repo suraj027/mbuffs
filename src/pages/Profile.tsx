@@ -17,7 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2 } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
-import { getForYouInfiniteQueryOptions, getForYouRecommendationsQueryKey, getPreferencesQueryKey } from '@/lib/recommendationQueries';
+import { FOR_YOU_PREVIEW_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getForYouRecommendationsQueryKey, getPreferencesQueryKey } from '@/lib/recommendationQueries';
 
 // ============================================================================
 // Image helpers
@@ -214,7 +214,7 @@ const Profile = () => {
 
                 if (enabled) {
                     queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
-                    void queryClient.prefetchInfiniteQuery(getForYouInfiniteQueryOptions(user.id));
+                    void queryClient.prefetchInfiniteQuery(getForYouInfiniteQueryOptions(user.id, FOR_YOU_PREVIEW_ITEMS_PER_PAGE));
                     return;
                 }
 

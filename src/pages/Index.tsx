@@ -1,5 +1,5 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useRef, useMemo } from 'react';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useMemo, useEffect } from 'react';
 import { MovieGrid } from "@/components/MovieGrid";
 import { MovieCard } from "@/components/MovieCard";
 import { fetchTrendingContentApi, fetchUserRegion, fetchUserPreferencesApi } from "@/lib/api";
@@ -12,10 +12,17 @@ import { Sparkles, Settings, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { UserPreferences } from '@/lib/types';
-import { getForYouInfiniteQueryOptions, getPreferencesQueryKey } from '@/lib/recommendationQueries';
+import {
+  FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE,
+  FOR_YOU_PREVIEW_ITEMS_PER_PAGE,
+  FOR_YOU_QUERY_STALE_TIME,
+  getForYouInfiniteQueryOptions,
+  getPreferencesQueryKey,
+} from '@/lib/recommendationQueries';
 
 const TRENDING_CONTENT_QUERY_KEY = ['content', 'trending'];
 const Index = () => {
+  const queryClient = useQueryClient();
   const { user, isLoadingUser } = useAuth();
   
   // Fetch user preferences separately
@@ -49,7 +56,7 @@ const Index = () => {
     data: recommendationsData,
     isLoading: isRecommendationsLoading,
   } = useInfiniteQuery({
-    ...getForYouInfiniteQueryOptions(user?.id),
+    ...getForYouInfiniteQueryOptions(user?.id, FOR_YOU_PREVIEW_ITEMS_PER_PAGE),
     enabled: !!user && recommendationsEnabled,
   });
 
@@ -60,6 +67,30 @@ const Index = () => {
     [firstRecommendationsPage]
   );
   const hasRecommendations = recommendationsEnabled && recommendations.length > 0;
+
+  useEffect(() => {
+    if (!user?.id || !recommendationsEnabled || !firstRecommendationsPage) {
+      return;
+    }
+
+    const fullPageQueryOptions = getForYouInfiniteQueryOptions(user.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE);
+    const fullPageQueryState = queryClient.getQueryState(fullPageQueryOptions.queryKey);
+
+    if (fullPageQueryState?.fetchStatus === 'fetching') {
+      return;
+    }
+
+    const isStillFresh =
+      !fullPageQueryState?.isInvalidated &&
+      !!fullPageQueryState?.dataUpdatedAt &&
+      Date.now() - fullPageQueryState.dataUpdatedAt < FOR_YOU_QUERY_STALE_TIME;
+
+    if (isStillFresh) {
+      return;
+    }
+
+    void queryClient.prefetchInfiniteQuery(fullPageQueryOptions);
+  }, [firstRecommendationsPage, queryClient, recommendationsEnabled, user?.id]);
 
   // Generate media IDs for watched status lookup (recommendations only)
   const recommendationMediaIds = useMemo(() => 
