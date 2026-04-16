@@ -17,6 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2 } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
+import { FOR_YOU_PREVIEW_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getForYouRecommendationsQueryKey, getPreferencesQueryKey } from '@/lib/recommendationQueries';
 
 // ============================================================================
 // Image helpers
@@ -64,13 +65,13 @@ const COLLECTIONS_QUERY_KEY = ['collections', 'user'];
 const USER_QUERY_KEY = ['user'];
 const USER_ME_QUERY_KEY = ['user', 'me'];
 const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
-const PREFERENCES_QUERY_KEY = ['user', 'preferences'];
 const WATCHED_ITEMS_QUERY_KEY = ['collections', 'watched', 'items'];
 const NOT_INTERESTED_ITEMS_QUERY_KEY = ['collections', 'not-interested', 'items'];
 
 const Profile = () => {
     const queryClient = useQueryClient();
     const { user, isLoadingUser } = useAuth();
+    const preferencesQueryKey = getPreferencesQueryKey(user?.id);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
@@ -89,7 +90,7 @@ const Profile = () => {
         data: preferencesData,
         isLoading: isLoadingPreferences,
     } = useQuery<{ preferences: UserPreferences }, Error>({
-        queryKey: PREFERENCES_QUERY_KEY,
+        queryKey: preferencesQueryKey,
         queryFn: fetchUserPreferencesApi,
         enabled: !!user,
     });
@@ -137,13 +138,13 @@ const Profile = () => {
         mutationFn: updateUserPreferencesApi,
         onMutate: async (newPreferences) => {
             // Cancel outgoing refetches
-            await queryClient.cancelQueries({ queryKey: PREFERENCES_QUERY_KEY });
+            await queryClient.cancelQueries({ queryKey: preferencesQueryKey });
             
             // Snapshot previous value
-            const previousPreferences = queryClient.getQueryData<{ preferences: UserPreferences }>(PREFERENCES_QUERY_KEY);
+            const previousPreferences = queryClient.getQueryData<{ preferences: UserPreferences }>(preferencesQueryKey);
             
             // Optimistically update
-            queryClient.setQueryData(PREFERENCES_QUERY_KEY, (old: { preferences: UserPreferences } | undefined) => ({
+            queryClient.setQueryData(preferencesQueryKey, (old: { preferences: UserPreferences } | undefined) => ({
                 preferences: {
                     ...old?.preferences,
                     ...newPreferences,
@@ -155,7 +156,7 @@ const Profile = () => {
         onError: (error: Error, _, context) => {
             // Rollback on error
             if (context?.previousPreferences) {
-                queryClient.setQueryData(PREFERENCES_QUERY_KEY, context.previousPreferences);
+                queryClient.setQueryData(preferencesQueryKey, context.previousPreferences);
             }
             toast.error(`Failed to update preferences`);
         },
@@ -189,6 +190,10 @@ const Profile = () => {
             }
             toast.error(`Failed to update collections`);
         },
+        onSuccess: () => {
+            if (!user?.id) return;
+            queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+        },
     });
 
     const handleToggleRecommendations = (enabled: boolean) => {
@@ -203,7 +208,19 @@ const Profile = () => {
             // Auto-enable category recommendations when enabling main recommendations
             updateData.category_recommendations_enabled = true;
         }
-        updatePreferencesMutation.mutate(updateData);
+        updatePreferencesMutation.mutate(updateData, {
+            onSuccess: () => {
+                if (!user?.id) return;
+
+                if (enabled) {
+                    queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+                    void queryClient.prefetchInfiniteQuery(getForYouInfiniteQueryOptions(user.id, FOR_YOU_PREVIEW_ITEMS_PER_PAGE));
+                    return;
+                }
+
+                queryClient.removeQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+            },
+        });
         
         // If enabling, refetch recommendation collections
         if (enabled) {

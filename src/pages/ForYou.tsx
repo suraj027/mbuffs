@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
 import { MovieCard } from "@/components/MovieCard";
-import { fetchRecommendationsApi, fetchUserPreferencesApi } from "@/lib/api";
+import { fetchUserPreferencesApi } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, Sparkles, Settings } from "lucide-react";
@@ -11,16 +11,17 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
+import { FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getPreferencesQueryKey } from "@/lib/recommendationQueries";
 
-const ITEMS_PER_PAGE = 20;
-const PREFERENCES_QUERY_KEY = ['user', 'preferences'];
+const INITIAL_LOADING_SKELETON_COUNT = 24;
+const INFINITE_SCROLL_SKELETON_COUNT = 12;
 
 const ForYou = () => {
   const { user } = useAuth();
 
   // Fetch user preferences separately
   const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
-    queryKey: PREFERENCES_QUERY_KEY,
+    queryKey: getPreferencesQueryKey(user?.id),
     queryFn: fetchUserPreferencesApi,
     enabled: !!user,
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
@@ -36,16 +37,7 @@ const ForYou = () => {
     hasNextPage,
     fetchNextPage,
   } = useInfiniteQuery({
-    queryKey: ['recommendations', 'all'],
-    queryFn: ({ pageParam = 1 }) => fetchRecommendationsApi(ITEMS_PER_PAGE, pageParam),
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => {
-      if (lastPage.page < lastPage.total_pages) {
-        return lastPage.page + 1;
-      }
-      return undefined;
-    },
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    ...getForYouInfiniteQueryOptions(user?.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE),
     enabled: !!user && recommendationsEnabled,
   });
 
@@ -71,32 +63,72 @@ const ForYou = () => {
 
   // Infinite scroll with Intersection Observer
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const fetchLockRef = useRef(false);
+  const fetchPromiseRef = useRef<Promise<unknown> | null>(null);
+
+  useEffect(() => {
+    if (!isFetchingNextPage) {
+      fetchLockRef.current = false;
+    }
+  }, [isFetchingNextPage]);
+
+  const safeFetchNextPage = useCallback(() => {
+    if (
+      !hasNextPage ||
+      isFetchingNextPage ||
+      fetchLockRef.current ||
+      fetchPromiseRef.current
+    ) {
+      return fetchPromiseRef.current ?? Promise.resolve();
+    }
+
+    fetchLockRef.current = true;
+    const nextPagePromise = fetchNextPage();
+    fetchPromiseRef.current = nextPagePromise;
+
+    return nextPagePromise.finally(() => {
+        if (fetchPromiseRef.current === nextPagePromise) {
+          fetchPromiseRef.current = null;
+        }
+        fetchLockRef.current = false;
+      });
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
-    if (isFetchingNextPage) return;
-    
     if (observerRef.current) {
       observerRef.current.disconnect();
+      observerRef.current = null;
     }
+
+    if (!node || isFetchingNextPage || !hasNextPage) return;
     
     observerRef.current = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && hasNextPage) {
-        fetchNextPage();
-      }
-    }, {
-      rootMargin: '200px', // Start loading before reaching the end
-    });
-    
-    if (node) {
-      observerRef.current.observe(node);
-    }
-  }, [isFetchingNextPage, hasNextPage, fetchNextPage]);
+      const entry = entries[0];
 
-  // Cleanup observer on unmount
+      if (
+        !entry?.isIntersecting ||
+        !hasNextPage ||
+        isFetchingNextPage
+      ) {
+        return;
+      }
+
+      void safeFetchNextPage().catch(() => undefined);
+    }, {
+      rootMargin: '0px 0px 1200px 0px', // Start loading well before reaching viewport end
+    });
+
+    observerRef.current.observe(node);
+  }, [isFetchingNextPage, hasNextPage, safeFetchNextPage]);
+
   useEffect(() => {
     return () => {
       if (observerRef.current) {
         observerRef.current.disconnect();
+        observerRef.current = null;
       }
+      fetchPromiseRef.current = null;
+      fetchLockRef.current = false;
     };
   }, []);
 
@@ -179,8 +211,8 @@ const ForYou = () => {
 
         {/* Grid */}
         {isLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-            {Array.from({ length: 18 }).map((_, index) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
+            {Array.from({ length: INITIAL_LOADING_SKELETON_COUNT }).map((_, index) => (
               <div key={index} className="space-y-3">
                 <Skeleton className="aspect-[2/3] w-full rounded-xl" />
                 <Skeleton className="h-4 w-[75%] rounded-md" />
@@ -205,7 +237,7 @@ const ForYou = () => {
                 );
               })}
               {/* Skeleton loaders for infinite scroll - inside the same grid */}
-              {isFetchingNextPage && Array.from({ length: 6 }).map((_, index) => (
+              {isFetchingNextPage && Array.from({ length: INFINITE_SCROLL_SKELETON_COUNT }).map((_, index) => (
                 <div key={`skeleton-${index}`} className="space-y-3">
                   <Skeleton className="aspect-[2/3] w-full rounded-xl" />
                   <Skeleton className="h-4 w-[75%] rounded-md" />
@@ -215,7 +247,7 @@ const ForYou = () => {
             </div>
 
             {/* Infinite scroll trigger */}
-            <div ref={loadMoreRef} />
+            <div ref={loadMoreRef} className="h-px w-full" aria-hidden="true" />
           </>
         ) : (
           <div className="text-center py-16">

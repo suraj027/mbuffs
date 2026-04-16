@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Film, Tv, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Link } from "react-router-dom";
+import { getPreferencesQueryKey } from "@/lib/recommendationQueries";
 
 // Popular genres to feature (subset for better UX)
 // Movie genres: Horror (27), Thriller (53), Drama (18), Sci-Fi (878), Animation (16), Action (28), Comedy (35), Romance (10749)
@@ -22,7 +23,7 @@ const Categories = () => {
 
   // Fetch user preferences to check if category recommendations are enabled
   const { data: preferencesData } = useQuery({
-    queryKey: ['user', 'preferences'],
+    queryKey: getPreferencesQueryKey(user?.id),
     queryFn: fetchUserPreferencesApi,
     enabled: !!user,
     staleTime: 1000 * 60 * 5, // 5 minutes

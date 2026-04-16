@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Clock, Calendar, Globe, Share2, X, MessageSquare, ChevronRight, Eye, EyeOff, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { getForYouRecommendationsQueryKey, getPreferencesQueryKey } from '@/lib/recommendationQueries';
 import { toast } from 'sonner';
 import { ReviewSection } from '@/components/reviews/ReviewSection';
 
@@ -140,7 +141,7 @@ const MovieDetail = () => {
     const queryKey = [mediaType, 'details', mediaId];
 
     const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
-        queryKey: ['user', 'preferences'],
+        queryKey: getPreferencesQueryKey(currentUser?.id),
         queryFn: fetchUserPreferencesApi,
         enabled: isLoggedIn,
         staleTime: 1000 * 60 * 5,
@@ -381,6 +382,12 @@ const MovieDetail = () => {
             queryClient.invalidateQueries({ queryKey: ['watched'] });
             queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
             queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
+            if (currentUser?.id) {
+                queryClient.invalidateQueries({
+                    queryKey: getForYouRecommendationsQueryKey(currentUser.id),
+                    refetchType: 'none',
+                });
+            }
         },
         onError: (_error: Error, _, context) => {
             // Rollback on error
@@ -421,6 +428,12 @@ const MovieDetail = () => {
             queryClient.invalidateQueries({ queryKey: ['notInterested'] });
             queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
             queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
+            if (currentUser?.id) {
+                queryClient.invalidateQueries({
+                    queryKey: getForYouRecommendationsQueryKey(currentUser.id),
+                    refetchType: 'none',
+                });
+            }
         },
         onError: (_error: Error, _, context) => {
             if (context?.previousData) {

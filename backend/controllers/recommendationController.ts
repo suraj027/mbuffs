@@ -13,11 +13,46 @@ import {
 import '../middleware/authMiddleware.js';
 
 const RECOMMENDATION_DEBUG_EMAIL = 'murtuza.creativity@gmail.com';
+const DEFAULT_PAGED_RECOMMENDATION_LIMIT = 60;
+const MAX_PAGED_RECOMMENDATION_LIMIT = 70;
+const MAX_PAGED_RECOMMENDATION_PAGE = 100;
+
+const parsePositiveInt = (value: unknown, fallback: number): number => {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const parseRecommendationLimit = (value: unknown): number =>
+    Math.min(parsePositiveInt(value, DEFAULT_PAGED_RECOMMENDATION_LIMIT), MAX_PAGED_RECOMMENDATION_LIMIT);
+
+const parseRecommendationPage = (value: unknown): { page: number; error: string | null } => {
+    if (value === undefined || value === null || value === '') {
+        return { page: 1, error: null };
+    }
+
+    const pageString = String(value).trim();
+    if (!/^\d+$/.test(pageString)) {
+        return {
+            page: 1,
+            error: `page must be an integer between 1 and ${MAX_PAGED_RECOMMENDATION_PAGE}`
+        };
+    }
+
+    const page = Number.parseInt(pageString, 10);
+    if (page < 1 || page > MAX_PAGED_RECOMMENDATION_PAGE) {
+        return {
+            page: 1,
+            error: `page must be between 1 and ${MAX_PAGED_RECOMMENDATION_PAGE}`
+        };
+    }
+
+    return { page, error: null };
+};
 
 /**
  * GET /api/recommendations
  * Get personalized recommendations for the authenticated user
- * Supports pagination with ?limit=20&page=1
+ * Supports pagination with ?limit=60&page=1
  */
 export const getRecommendations = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userId) {
@@ -25,8 +60,12 @@ export const getRecommendations = async (req: Request, res: Response, next: Next
     }
 
     try {
-        const limit = parseInt(req.query.limit as string) || 20;
-        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseRecommendationLimit(req.query.limit);
+        const { page, error: pageError } = parseRecommendationPage(req.query.page);
+        if (pageError) {
+            return res.status(400).json({ message: pageError });
+        }
+
         const recommendations = await generateRecommendationsCached(req.userId, limit, page);
         
         res.status(200).json(recommendations);
@@ -66,7 +105,7 @@ export const getCategoryRecommendations = async (req: Request, res: Response, ne
 /**
  * GET /api/recommendations/genre/:genreId
  * Get personalized recommendations for a specific genre with pagination
- * Supports ?mediaType=movie|tv&limit=20&page=1
+ * Supports ?mediaType=movie|tv&limit=60&page=1
  */
 export const getGenreRecommendations = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userId) {
@@ -76,11 +115,15 @@ export const getGenreRecommendations = async (req: Request, res: Response, next:
     try {
         const genreId = parseInt(req.params.genreId, 10);
         const mediaType = (req.query.mediaType as 'movie' | 'tv') || 'movie';
-        const limit = parseInt(req.query.limit as string) || 20;
-        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseRecommendationLimit(req.query.limit);
+        const { page, error: pageError } = parseRecommendationPage(req.query.page);
 
         if (isNaN(genreId)) {
             return res.status(400).json({ message: "Invalid genreId" });
+        }
+
+        if (pageError) {
+            return res.status(400).json({ message: pageError });
         }
 
         if (mediaType !== 'movie' && mediaType !== 'tv') {
@@ -99,7 +142,7 @@ export const getGenreRecommendations = async (req: Request, res: Response, next:
 /**
  * GET /api/recommendations/theatrical
  * Get personalized theatrical releases (now playing movies)
- * Supports ?limit=20&page=1
+ * Supports ?limit=60&page=1
  */
 export const getTheatricalRecommendations = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userId) {
@@ -107,8 +150,11 @@ export const getTheatricalRecommendations = async (req: Request, res: Response, 
     }
 
     try {
-        const limit = parseInt(req.query.limit as string) || 20;
-        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseRecommendationLimit(req.query.limit);
+        const { page, error: pageError } = parseRecommendationPage(req.query.page);
+        if (pageError) {
+            return res.status(400).json({ message: pageError });
+        }
 
         const recommendations = await generatePersonalizedTheatricalReleasesCached(req.userId, limit, page);
         

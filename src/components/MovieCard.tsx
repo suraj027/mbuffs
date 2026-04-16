@@ -4,6 +4,7 @@ import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp } from "lucide-re
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { getForYouRecommendationsQueryKey } from "@/lib/recommendationQueries";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,7 @@ export function MovieCard({
   const randomBucket = ((movie.id * 7) + (movie.name || movie.title || '').length) % 10;
   const shouldShowBecauseYouLiked = meetsExplainabilityCondition && randomBucket === 0;
   
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, user } = useAuth();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
@@ -79,6 +80,12 @@ export function MovieCard({
       queryClient.invalidateQueries({ queryKey: ['watched'] });
       queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
       queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
+      if (user?.id) {
+        queryClient.invalidateQueries({
+          queryKey: getForYouRecommendationsQueryKey(user.id),
+          refetchType: 'none',
+        });
+      }
     },
     onError: (_error: Error, _, context) => {
       if (context) {
@@ -104,6 +111,12 @@ export function MovieCard({
       queryClient.invalidateQueries({ queryKey: ['notInterested'] });
       queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
       queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
+      if (user?.id) {
+        queryClient.invalidateQueries({
+          queryKey: getForYouRecommendationsQueryKey(user.id),
+          refetchType: 'none',
+        });
+      }
     },
     onError: (_error: Error, _, context) => {
       if (context) {
