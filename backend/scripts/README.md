@@ -21,8 +21,20 @@ REDDIT_SUBREDDITS=MovieSuggestions,movies,horror  # Comma-separated list (defaul
 REDDIT_POSTS_PER_SUB=25            # Posts to fetch per subreddit (default: 25)
 REDDIT_MIN_SCORE=10                # Minimum upvote score (default: 10)
 REDDIT_TIMEFRAME=week              # hour|day|week|month|year|all (default: week)
-REDDIT_CACHE_TTL_HOURS=168         # Cache validity in hours (default: 168 = 1 week)
+REDDIT_CACHE_TTL_HOURS=720         # Cache validity in hours (default: 720 = 30 days)
 REDDIT_SCRAPE_IN_CI=true           # Opt-in: allow scraping when CI=true (default: skip in CI)
+REDDIT_AI_BATCH_SIZE=80            # Text items per AI extraction call
+REDDIT_AI_CONCURRENCY=3            # Parallel AI extraction workers
+REDDIT_AI_BATCH_DELAY_MS=0         # Optional delay between AI calls per worker
+REDDIT_AI_TEXT_CHARS_PER_ITEM=500  # Max chars per text snippet sent to AI
+REDDIT_AI_PROMPT_TEXT_BUDGET_CHARS=8000 # Total text budget per AI request
+REDDIT_AI_TIMEOUT_MS=0             # Per AI extraction timeout in ms (default: disabled)
+REDDIT_AI_MAX_RETRIES=2            # Retries for AI extraction failures/timeouts
+REDDIT_TMDB_VALIDATE_LIMIT=150     # Max titles to validate (0 = validate all)
+REDDIT_TMDB_CONCURRENCY=5          # Parallel title checks
+REDDIT_TMDB_RPS=10                 # TMDB requests/sec cap across all workers
+REDDIT_TMDB_TIMEOUT_MS=10000       # Per-request timeout in ms
+REDDIT_TMDB_MAX_RETRIES=2          # Retries for 429/5xx/timeouts
 ```
 
 ### Commands
