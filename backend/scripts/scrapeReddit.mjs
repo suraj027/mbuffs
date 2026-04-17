@@ -36,6 +36,7 @@ dotenv.config();
  * Example: REDDIT_SUBREDDITS=MovieSuggestions,horror,scifi
  */
 const DEFAULT_SUBREDDITS = [
+    'a24',
     'MovieSuggestions',    // ~2M members - dedicated recommendation sub
     'movies',              // ~35M members - general movie discussion
     'flicks',              // ~150K members - quality movie discussion
@@ -52,20 +53,60 @@ const DEFAULT_SUBREDDITS = [
     'AskReddit', // For "What movie should I watch?" threads
     'CineSeries',
     'televisionsuggestions', // TV recommendations
-    'a24',
+    'Ijustwatched',
 ];
+
+function getEnvInt(name, fallback, min = Number.NEGATIVE_INFINITY) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') {
+        return fallback;
+    }
+
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+
+    return Math.max(min, parsed);
+}
+
+function getEnvFloat(name, fallback, min = Number.NEGATIVE_INFINITY) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') {
+        return fallback;
+    }
+
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+
+    return Math.max(min, parsed);
+}
 
 // Parse subreddits from env or use defaults
 const MOVIE_SUBREDDITS = process.env.REDDIT_SUBREDDITS
     ? process.env.REDDIT_SUBREDDITS.split(',').map(s => s.trim()).filter(Boolean)
     : DEFAULT_SUBREDDITS;
 
-const POSTS_PER_SUBREDDIT = parseInt(process.env.REDDIT_POSTS_PER_SUB || '25', 10);
-const MIN_SCORE = parseInt(process.env.REDDIT_MIN_SCORE || '10', 10);
+const POSTS_PER_SUBREDDIT = getEnvInt('REDDIT_POSTS_PER_SUB', 25, 1);
+const MIN_SCORE = getEnvInt('REDDIT_MIN_SCORE', 10, 0);
 const TIMEFRAME = process.env.REDDIT_TIMEFRAME || 'all'; // hour, day, week, month, year, all
+const AI_BATCH_SIZE = getEnvInt('REDDIT_AI_BATCH_SIZE', 80, 10);
+const AI_CONCURRENCY = getEnvInt('REDDIT_AI_CONCURRENCY', 3, 1);
+const AI_BATCH_DELAY_MS = getEnvInt('REDDIT_AI_BATCH_DELAY_MS', 0, 0);
+const AI_TEXT_CHARS_PER_ITEM = getEnvInt('REDDIT_AI_TEXT_CHARS_PER_ITEM', 500, 50);
+const AI_PROMPT_TEXT_BUDGET_CHARS = getEnvInt('REDDIT_AI_PROMPT_TEXT_BUDGET_CHARS', 8000, 2000);
+const AI_TIMEOUT_MS = getEnvInt('REDDIT_AI_TIMEOUT_MS', 0, 0);
+const AI_MAX_RETRIES = getEnvInt('REDDIT_AI_MAX_RETRIES', 2, 0);
+const TMDB_VALIDATE_LIMIT = getEnvInt('REDDIT_TMDB_VALIDATE_LIMIT', 150, 0);
+const TMDB_CONCURRENCY = getEnvInt('REDDIT_TMDB_CONCURRENCY', 5, 1);
+const TMDB_RPS = getEnvFloat('REDDIT_TMDB_RPS', 10, 1);
+const TMDB_TIMEOUT_MS = getEnvInt('REDDIT_TMDB_TIMEOUT_MS', 10000, 1000);
+const TMDB_MAX_RETRIES = getEnvInt('REDDIT_TMDB_MAX_RETRIES', 2, 0);
 
 // Cache configuration - only re-scrape if data is older than this (default: 1 month)
-const CACHE_TTL_HOURS = parseInt(process.env.REDDIT_CACHE_TTL_HOURS || '720', 10); // 720 hours = 30 days
+const CACHE_TTL_HOURS = getEnvInt('REDDIT_CACHE_TTL_HOURS', 720, 1); // 720 hours = 30 days
 
 // Generate a hash of the subreddit list to detect config changes
 const SUBREDDITS_HASH = MOVIE_SUBREDDITS.slice().sort().join(',').toLowerCase();
@@ -85,6 +126,27 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function withTimeout(promiseFactory, timeoutMs, operationName) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        return promiseFactory();
+    }
+
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            const timeoutError = new Error(`${operationName} timed out after ${timeoutMs}ms`);
+            timeoutError.name = 'TimeoutError';
+            reject(timeoutError);
+        }, timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promiseFactory(), timeoutPromise]);
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 function generateId(length = 15) {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
@@ -92,6 +154,72 @@ function generateId(length = 15) {
         result += alphabet[Math.floor(Math.random() * alphabet.length)];
     }
     return result;
+}
+
+let tmdbNextAvailableAt = 0;
+
+async function waitForTMDBSlot() {
+    const minIntervalMs = 1000 / TMDB_RPS;
+    const now = Date.now();
+    const waitMs = Math.max(0, tmdbNextAvailableAt - now);
+    tmdbNextAvailableAt = Math.max(tmdbNextAvailableAt, now) + minIntervalMs;
+    if (waitMs > 0) {
+        await sleep(waitMs);
+    }
+}
+
+function getRetryDelayMs(attempt, retryAfterHeader = null) {
+    const retryAfterSeconds = Number(retryAfterHeader);
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+        return retryAfterSeconds * 1000;
+    }
+
+    const base = 400;
+    const jitter = Math.floor(Math.random() * 300);
+    return (base * Math.pow(2, attempt)) + jitter;
+}
+
+async function fetchTMDBJson(url) {
+    for (let attempt = 0; attempt <= TMDB_MAX_RETRIES; attempt++) {
+        await waitForTMDBSlot();
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
+
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+
+            if (response.status === 429 && attempt < TMDB_MAX_RETRIES) {
+                const delayMs = getRetryDelayMs(attempt, response.headers.get('retry-after'));
+                await sleep(delayMs);
+                continue;
+            }
+
+            if (!response.ok) {
+                if (response.status >= 500 && attempt < TMDB_MAX_RETRIES) {
+                    await sleep(getRetryDelayMs(attempt));
+                    continue;
+                }
+                return null;
+            }
+
+            return await response.json();
+        } catch (error) {
+            if (attempt < TMDB_MAX_RETRIES) {
+                await sleep(getRetryDelayMs(attempt));
+                continue;
+            }
+
+            if (error?.name === 'AbortError') {
+                console.warn(`  TMDB request timed out after ${TMDB_TIMEOUT_MS}ms`);
+            }
+            return null;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    return null;
 }
 
 // Reddit rate limit: ~10 requests per minute for unauthenticated
@@ -177,11 +305,26 @@ const MOVIE_EXTRACTION_SCHEMA = {
  * Use Codex to extract movie/show names from text
  * Returns array of { title, year, sentiment }
  */
+function parseMovieExtractionResponse(raw) {
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) {
+            throw new Error('No JSON object found in Codex response');
+        }
+        parsed = JSON.parse(match[0]);
+    }
+
+    const movies = Array.isArray(parsed?.movies) ? parsed.movies : [];
+    return movies.filter(m => m && typeof m.title === 'string' && m.title.trim());
+}
+
 async function extractMoviesWithAI(texts) {
     const combinedText = texts
-        .map(t => t.text.substring(0, 500))
-        .join('\n---\n')
-        .substring(0, 8000);
+        .map(t => t.text)
+        .join('\n---\n');
 
     if (!combinedText.trim()) {
         return [];
@@ -211,70 +354,172 @@ ${combinedText}`;
         threadOptions.model = CODEX_MODEL;
     }
 
-    try {
-        const thread = codex.startThread(threadOptions);
-        const turn = await thread.run(prompt, { outputSchema: MOVIE_EXTRACTION_SCHEMA });
+    for (let attempt = 0; attempt <= AI_MAX_RETRIES; attempt++) {
+        try {
+            const thread = codex.startThread(threadOptions);
+            const turn = await withTimeout(
+                () => thread.run(prompt, { outputSchema: MOVIE_EXTRACTION_SCHEMA }),
+                AI_TIMEOUT_MS,
+                'Codex extraction'
+            );
 
-        const raw = (turn.finalResponse || '').trim();
-        if (!raw) {
+            const raw = (turn.finalResponse || '').trim();
+            if (!raw) {
+                return [];
+            }
+
+            return parseMovieExtractionResponse(raw);
+        } catch (error) {
+            if (attempt < AI_MAX_RETRIES) {
+                const delayMs = getRetryDelayMs(attempt);
+                console.warn(
+                    `  Codex extraction failed (${attempt + 1}/${AI_MAX_RETRIES + 1}): ${error.message}. Retrying in ${(delayMs / 1000).toFixed(1)}s...`
+                );
+                await sleep(delayMs);
+                continue;
+            }
+
+            console.error(`  Codex extraction error: ${error.message}`);
             return [];
         }
-
-        let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            const match = raw.match(/\{[\s\S]*\}/);
-            if (!match) return [];
-            parsed = JSON.parse(match[0]);
-        }
-
-        const movies = Array.isArray(parsed?.movies) ? parsed.movies : [];
-        return movies.filter(m => m && typeof m.title === 'string' && m.title.trim());
-    } catch (error) {
-        console.error(`  Codex extraction error: ${error.message}`);
-        return [];
     }
+
+    return [];
 }
 
 /**
  * Batch texts for AI processing to reduce API calls
- * Groups texts into batches of ~10 for efficiency
+ * Groups texts into configurable sized batches
  */
+function normalizeTextForAI(text) {
+    if (typeof text !== 'string') {
+        return '';
+    }
+
+    const maxCharsPerItem = Math.min(AI_TEXT_CHARS_PER_ITEM, AI_PROMPT_TEXT_BUDGET_CHARS);
+    return text.substring(0, maxCharsPerItem).trim();
+}
+
 function batchTextsForAI(posts, comments) {
     const allTexts = [];
     
     // Add post titles and bodies
     for (const post of posts) {
         if (post.title) {
-            allTexts.push({ text: post.title, score: post.score, postId: post.id, postTitle: post.title });
+            const titleText = normalizeTextForAI(post.title);
+            if (titleText) {
+                allTexts.push({ text: titleText, score: post.score, postId: post.id, postTitle: post.title, subreddit: post.subreddit });
+            }
         }
         if (post.selftext && post.selftext.length > 20) {
-            allTexts.push({ text: post.selftext, score: post.score, postId: post.id, postTitle: post.title });
+            const selfText = normalizeTextForAI(post.selftext);
+            if (selfText) {
+                allTexts.push({ text: selfText, score: post.score, postId: post.id, postTitle: post.title, subreddit: post.subreddit });
+            }
         }
     }
     
     // Add comments
     for (const comment of comments) {
         if (comment.body && comment.body.length > 10) {
-            allTexts.push({ 
-                text: comment.body, 
-                score: comment.score, 
-                postId: comment.postId, 
-                postTitle: comment.postTitle 
-            });
+            const commentText = normalizeTextForAI(comment.body);
+            if (commentText) {
+                allTexts.push({ 
+                    text: commentText, 
+                    score: comment.score, 
+                    postId: comment.postId, 
+                    postTitle: comment.postTitle,
+                    subreddit: comment.subreddit,
+                });
+            }
         }
     }
     
-    // Batch into large groups to minimize API calls (free tier: 20 requests/min)
-    // With ~1000 texts and batch size of 50, we get ~20 batches
-    const BATCH_SIZE = 50;
+    // Batch by both item count and prompt character budget
     const batches = [];
-    for (let i = 0; i < allTexts.length; i += BATCH_SIZE) {
-        batches.push(allTexts.slice(i, i + BATCH_SIZE));
+    const separatorLength = '\n---\n'.length;
+    let currentBatch = [];
+    let currentBatchChars = 0;
+
+    for (const item of allTexts) {
+        const itemChars = item.text.length;
+        const additionalChars = currentBatch.length === 0 ? itemChars : separatorLength + itemChars;
+        const exceedsCount = currentBatch.length >= AI_BATCH_SIZE;
+        const exceedsChars = currentBatch.length > 0 && (currentBatchChars + additionalChars > AI_PROMPT_TEXT_BUDGET_CHARS);
+
+        if (exceedsCount || exceedsChars) {
+            batches.push(currentBatch);
+            currentBatch = [];
+            currentBatchChars = 0;
+        }
+
+        const charsToAdd = currentBatch.length === 0 ? itemChars : separatorLength + itemChars;
+        currentBatch.push(item);
+        currentBatchChars += charsToAdd;
+    }
+
+    if (currentBatch.length > 0) {
+        batches.push(currentBatch);
     }
     
     return batches;
+}
+
+function getSourceMeta(postInfo = {}) {
+    const subreddit = postInfo.subreddit || 'unknown';
+    const postId = postInfo.postId || 'unknown';
+    const postTitle = postInfo.postTitle || '';
+    const sourceKey = `${String(subreddit).toLowerCase()}|${String(postId)}|${String(postTitle).toLowerCase()}`;
+
+    return { subreddit, postId, postTitle, sourceKey };
+}
+
+function addMovieMention(allMentions, movie, avgScore, postInfo) {
+    const key = movie.title.toLowerCase().trim();
+    const sourceMeta = getSourceMeta(postInfo);
+
+    if (allMentions.has(key)) {
+        const existing = allMentions.get(key);
+        existing.count++;
+        existing.totalScore += avgScore;
+
+        if (movie.sentiment === 'positive') {
+            existing.sentiment = 'positive';
+        }
+
+        const hasBetterSource = avgScore > existing.sourceScore;
+        const isSameScoreButBetterTiebreak =
+            avgScore === existing.sourceScore && sourceMeta.sourceKey < existing.sourceKey;
+
+        if (hasBetterSource || isSameScoreButBetterTiebreak) {
+            existing.subreddit = sourceMeta.subreddit;
+            existing.postId = sourceMeta.postId;
+            existing.postTitle = sourceMeta.postTitle;
+            existing.sourceScore = avgScore;
+            existing.sourceKey = sourceMeta.sourceKey;
+
+            if (movie.year !== null && movie.year !== undefined) {
+                existing.year = movie.year;
+            }
+        } else if ((existing.year === null || existing.year === undefined) && movie.year !== null && movie.year !== undefined) {
+            existing.year = movie.year;
+        }
+
+        return;
+    }
+
+    allMentions.set(key, {
+        title: movie.title,
+        year: movie.year,
+        sentiment: movie.sentiment || 'neutral',
+        subreddit: sourceMeta.subreddit,
+        postId: sourceMeta.postId,
+        postTitle: sourceMeta.postTitle,
+        count: 1,
+        totalScore: avgScore,
+        sourceScore: avgScore,
+        sourceKey: sourceMeta.sourceKey,
+    });
 }
 
 // ============================================================================
@@ -297,12 +542,9 @@ async function searchTMDB(title, year, mediaType = 'movie') {
             url.searchParams.append(mediaType === 'movie' ? 'year' : 'first_air_date_year', year.toString());
         }
 
-        let response = await fetch(url.toString());
-        if (response.ok) {
-            const data = await response.json();
-            if (data.results && data.results.length > 0) {
-                return { tmdbId: data.results[0].id.toString(), mediaType };
-            }
+        let data = await fetchTMDBJson(url.toString());
+        if (data?.results?.length > 0) {
+            return { tmdbId: data.results[0].id.toString(), mediaType };
         }
 
         // Try TV if movie fails
@@ -311,12 +553,9 @@ async function searchTMDB(title, year, mediaType = 'movie') {
             url.searchParams.append('api_key', TMDB_API_KEY);
             url.searchParams.append('query', title);
             
-            response = await fetch(url.toString());
-            if (response.ok) {
-                const data = await response.json();
-                if (data.results && data.results.length > 0) {
-                    return { tmdbId: data.results[0].id.toString(), mediaType: 'tv' };
-                }
+            data = await fetchTMDBJson(url.toString());
+            if (data?.results?.length > 0) {
+                return { tmdbId: data.results[0].id.toString(), mediaType: 'tv' };
             }
         }
 
@@ -437,93 +676,96 @@ async function scrapeReddit() {
     console.log('  Extracting movies with AI...');
     
     const batches = batchTextsForAI(allPosts, allComments);
-    console.log(`  Processing ${batches.length} batches...`);
+    console.log(`  Processing ${batches.length} batches (${AI_CONCURRENCY} concurrent, batch size ${AI_BATCH_SIZE})...`);
     
     const allMentions = new Map();
     let batchNum = 0;
     
-    for (const batch of batches) {
-        batchNum++;
-        const movies = await extractMoviesWithAI(batch);
-        
-        // Calculate average score for this batch
-        const avgScore = batch.reduce((sum, t) => sum + (t.score || 1), 0) / batch.length;
-        const postInfo = batch[0]; // Use first item's post info
-        
-        for (const movie of movies) {
-            const key = movie.title.toLowerCase().trim();
-            
-            if (allMentions.has(key)) {
-                const existing = allMentions.get(key);
-                existing.count++;
-                existing.totalScore += avgScore;
-                // Keep the most positive sentiment
-                if (movie.sentiment === 'positive') {
-                    existing.sentiment = 'positive';
-                }
-            } else {
-                allMentions.set(key, {
-                    title: movie.title,
-                    year: movie.year,
-                    sentiment: movie.sentiment || 'neutral',
-                    subreddit: postInfo.subreddit || 'unknown',
-                    postId: postInfo.postId || 'unknown',
-                    postTitle: postInfo.postTitle || '',
-                    count: 1,
-                    totalScore: avgScore,
-                });
+    let nextBatchIndex = 0;
+    const batchWorkers = Array.from({ length: Math.min(AI_CONCURRENCY, batches.length) }, async () => {
+        while (true) {
+            const currentIndex = nextBatchIndex++;
+            if (currentIndex >= batches.length) {
+                return;
+            }
+
+            const batch = batches[currentIndex];
+            const movies = await extractMoviesWithAI(batch);
+
+            const avgScore = batch.reduce((sum, t) => sum + (t.score || 1), 0) / batch.length;
+            const postInfo = batch[0];
+
+            for (const movie of movies) {
+                addMovieMention(allMentions, movie, avgScore, postInfo);
+            }
+
+            batchNum++;
+            if (batchNum % 5 === 0 || batchNum === batches.length) {
+                console.log(`    Batch ${batchNum}/${batches.length} - Found ${allMentions.size} unique movies so far`);
+            }
+
+            if (AI_BATCH_DELAY_MS > 0) {
+                await sleep(AI_BATCH_DELAY_MS);
             }
         }
-        
-        // Progress indicator
-        if (batchNum % 5 === 0 || batchNum === batches.length) {
-            console.log(`    Batch ${batchNum}/${batches.length} - Found ${allMentions.size} unique movies so far`);
-        }
-        
-        await sleep(1000); // small pause between Codex CLI invocations
-    }
+    });
+
+    await Promise.all(batchWorkers);
 
     console.log(`  AI extracted ${allMentions.size} unique movie/show titles`);
 
     // Phase 3: Validate against TMDB
-    const recommendations = [];
     const sortedMentions = Array.from(allMentions.entries())
-        .sort((a, b) => (b[1].count * b[1].totalScore) - (a[1].count * a[1].totalScore))
-        .slice(0, 150);
+        .sort((a, b) => (b[1].count * b[1].totalScore) - (a[1].count * a[1].totalScore));
+    const mentionsToValidate = TMDB_VALIDATE_LIMIT > 0
+        ? sortedMentions.slice(0, TMDB_VALIDATE_LIMIT)
+        : sortedMentions;
 
-    console.log(`  Validating ${sortedMentions.length} titles against TMDB...`);
+    console.log(`  Validating ${mentionsToValidate.length} titles against TMDB (${TMDB_CONCURRENCY} concurrent, ${TMDB_RPS.toFixed(1)} req/s cap)...`);
     let checkedCount = 0;
     let matchedCount = 0;
-    
-    for (const [_key, data] of sortedMentions) {
-        checkedCount++;
-        const tmdbResult = await searchTMDB(data.title, data.year);
-        
-        if (tmdbResult) {
-            matchedCount++;
-            recommendations.push({
-                id: generateId(15),
-                title: data.title,
-                tmdbId: tmdbResult.tmdbId,
-                mediaType: tmdbResult.mediaType,
-                subreddit: data.subreddit,
-                postId: data.postId,
-                postTitle: data.postTitle,
-                mentionCount: data.count,
-                totalScore: Math.round(data.totalScore),
-                sentiment: data.sentiment,
-                genres: [],
-            });
+    const recommendationsByIndex = new Array(mentionsToValidate.length).fill(null);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: Math.min(TMDB_CONCURRENCY, mentionsToValidate.length) }, async () => {
+        while (true) {
+            const currentIndex = nextIndex++;
+            if (currentIndex >= mentionsToValidate.length) {
+                return;
+            }
+
+            const [_key, data] = mentionsToValidate[currentIndex];
+            const tmdbResult = await searchTMDB(data.title, data.year);
+
+            checkedCount++;
+
+            if (tmdbResult) {
+                matchedCount++;
+                recommendationsByIndex[currentIndex] = {
+                    id: generateId(15),
+                    title: data.title,
+                    tmdbId: tmdbResult.tmdbId,
+                    mediaType: tmdbResult.mediaType,
+                    subreddit: data.subreddit,
+                    postId: data.postId,
+                    postTitle: data.postTitle,
+                    mentionCount: data.count,
+                    totalScore: Math.round(data.totalScore),
+                    sentiment: data.sentiment,
+                    genres: [],
+                };
+            }
+
+            if (checkedCount % 25 === 0 || checkedCount === mentionsToValidate.length) {
+                console.log(`    Checked ${checkedCount}/${mentionsToValidate.length}, found ${matchedCount} valid...`);
+            }
         }
+    });
 
-        if (checkedCount % 25 === 0) {
-            console.log(`    Checked ${checkedCount}/${sortedMentions.length}, found ${matchedCount} valid...`);
-        }
+    await Promise.all(workers);
 
-        await sleep(200);
-    }
-
-    console.log(`  Validated ${matchedCount}/${sortedMentions.length} as real movies/shows`);
+    const recommendations = recommendationsByIndex.filter(Boolean);
+    console.log(`  Validated ${matchedCount}/${mentionsToValidate.length} as real movies/shows`);
 
     return recommendations;
 }
@@ -653,12 +895,16 @@ const IS_CI = !!(process.env.CI || process.env.VERCEL || process.env.GITHUB_ACTI
 const REDDIT_SCRAPE_IN_CI = process.env.REDDIT_SCRAPE_IN_CI === 'true';
 
 async function main() {
+    const aiTimeoutLabel = AI_TIMEOUT_MS > 0 ? `${AI_TIMEOUT_MS}ms` : 'off';
+
     console.log('=== Reddit Recommendations Scraper ===\n');
     console.log('Configuration:');
     console.log(`  Subreddits: ${MOVIE_SUBREDDITS.join(', ')}`);
     console.log(`  Posts per subreddit: ${POSTS_PER_SUBREDDIT}`);
     console.log(`  Min score: ${MIN_SCORE}`);
     console.log(`  Timeframe: ${TIMEFRAME}`);
+    console.log(`  AI extraction: batch=${AI_BATCH_SIZE}, concurrency=${AI_CONCURRENCY}, promptChars=${AI_PROMPT_TEXT_BUDGET_CHARS}, timeout=${aiTimeoutLabel}, retries=${AI_MAX_RETRIES}`);
+    console.log(`  TMDB validation: limit=${TMDB_VALIDATE_LIMIT === 0 ? 'all' : TMDB_VALIDATE_LIMIT}, concurrency=${TMDB_CONCURRENCY}, rps=${TMDB_RPS.toFixed(1)}, retries=${TMDB_MAX_RETRIES}`);
     console.log(`  Cache TTL: ${CACHE_TTL_HOURS} hours`);
     console.log(`  Force scrape: ${FORCE_SCRAPE}`);
     console.log(`  CI environment: ${IS_CI ? 'Yes' : 'No'}`);
