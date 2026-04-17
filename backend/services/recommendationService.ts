@@ -1,9 +1,37 @@
 import { sql } from '../lib/db.js';
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getRedditRecommendations } from './redditService.js';
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
+
+// Per-request context: carries the caller's `show_adult_items` preference through
+// the deep call tree so `fetchTMDB` can enforce `include_adult` without
+// threading a boolean through every internal helper.
+interface RecommendationContext {
+    includeAdult: boolean;
+}
+const recommendationContext = new AsyncLocalStorage<RecommendationContext>();
+
+async function resolveShowAdultItems(userId: string): Promise<boolean> {
+    try {
+        const result = await sql`SELECT show_adult_items FROM "user" WHERE id = ${userId}`;
+        if (result.length === 0) return false;
+        return result[0].show_adult_items ?? false;
+    } catch (error) {
+        console.error('[recommendationService] failed to resolve show_adult_items:', error);
+        return false;
+    }
+}
+
+async function withRecommendationContext<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+    const includeAdult = await resolveShowAdultItems(userId);
+    console.log(`[adult-filter] recommendation run user=${userId} includeAdult=${includeAdult}`);
+    return recommendationContext.run({ includeAdult }, fn);
+}
+
+const getIncludeAdult = (): boolean => recommendationContext.getStore()?.includeAdult ?? false;
 
 interface CollectionMovie {
     movie_id: string;
@@ -1224,19 +1252,45 @@ async function fetchTMDB<T>(endpoint: string, params: Record<string, string> = {
         console.error("TMDB API key is missing");
         return null;
     }
-    
+
+    const includeAdult = getIncludeAdult();
+
     const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
     url.searchParams.append('api_key', TMDB_API_KEY);
     url.searchParams.append('language', 'en-US');
-    Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
-    
+    Object.entries(params).forEach(([key, value]) => {
+        if (key === 'include_adult') return;
+        url.searchParams.append(key, value);
+    });
+    url.searchParams.set('include_adult', includeAdult ? 'true' : 'false');
+
     try {
         const response = await fetch(url.toString());
         if (!response.ok) {
             console.error(`TMDB API Error (${response.status}) on ${endpoint}`);
             return null;
         }
-        return await response.json() as T;
+        const data = await response.json() as T;
+        if (!includeAdult && data && typeof data === 'object') {
+            const obj = data as Record<string, unknown>;
+            const results = obj.results;
+            if (Array.isArray(results)) {
+                const before = results.length;
+                const kept = results.filter(
+                    (item) => !(item && typeof item === 'object' && (item as { adult?: boolean }).adult === true)
+                );
+                obj.results = kept;
+                const removed = before - kept.length;
+                if (removed > 0) {
+                    console.log(`[adult-filter] service endpoint=${endpoint} includeAdult=false dropped=${removed}/${before} results`);
+                }
+            } else if ((obj as { adult?: boolean }).adult === true) {
+                // Single-item detail response for an adult-flagged title → treat as missing.
+                console.log(`[adult-filter] service endpoint=${endpoint} includeAdult=false dropped single adult detail`);
+                return null;
+            }
+        }
+        return data;
     } catch (error) {
         console.error(`TMDB Network error on ${endpoint}:`, error);
         return null;
@@ -3252,11 +3306,13 @@ export async function generateRecommendationsCached(
     limit: number = 60,
     page: number = 1
 ): Promise<RecommendationResult> {
-    return getCachedRecommendationResult(
-        userId,
-        'for_you',
-        { limit, page },
-        () => generateRecommendations(userId, limit, page)
+    return withRecommendationContext(userId, () =>
+        getCachedRecommendationResult(
+            userId,
+            'for_you',
+            { limit, page },
+            () => generateRecommendations(userId, limit, page)
+        )
     );
 }
 
@@ -3265,11 +3321,13 @@ export async function generateCategoryRecommendationsCached(
     mediaType: 'movie' | 'tv' = 'movie',
     limit: number = 10
 ): Promise<CategoryRecommendationsResult> {
-    return getCachedRecommendationResult(
-        userId,
-        'categories',
-        { mediaType, limit },
-        () => generateCategoryRecommendations(userId, mediaType, limit)
+    return withRecommendationContext(userId, () =>
+        getCachedRecommendationResult(
+            userId,
+            'categories',
+            { mediaType, limit },
+            () => generateCategoryRecommendations(userId, mediaType, limit)
+        )
     );
 }
 
@@ -3287,11 +3345,13 @@ export async function generateGenreRecommendationsCached(
     sourceCollections: { id: string; name: string }[];
     totalSourceItems: number;
 }> {
-    return getCachedRecommendationResult(
-        userId,
-        'genre',
-        { genreId, mediaType, limit, page },
-        () => generateGenreRecommendations(userId, genreId, mediaType, limit, page)
+    return withRecommendationContext(userId, () =>
+        getCachedRecommendationResult(
+            userId,
+            'genre',
+            { genreId, mediaType, limit, page },
+            () => generateGenreRecommendations(userId, genreId, mediaType, limit, page)
+        )
     );
 }
 
@@ -3307,10 +3367,12 @@ export async function generatePersonalizedTheatricalReleasesCached(
     sourceCollections: { id: string; name: string }[];
     totalSourceItems: number;
 }> {
-    return getCachedRecommendationResult(
-        userId,
-        'theatrical',
-        { limit, page },
-        () => generatePersonalizedTheatricalReleases(userId, limit, page)
+    return withRecommendationContext(userId, () =>
+        getCachedRecommendationResult(
+            userId,
+            'theatrical',
+            { limit, page },
+            () => generatePersonalizedTheatricalReleases(userId, limit, page)
+        )
     );
 }

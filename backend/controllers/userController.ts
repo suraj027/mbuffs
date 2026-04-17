@@ -15,8 +15,8 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
 
     try {
         const result = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled 
-            FROM "user" 
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
+            FROM "user"
             WHERE id = ${req.userId}
         `;
 
@@ -29,6 +29,7 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
             recommendations_enabled: user.recommendations_enabled ?? false,
             recommendations_collection_id: user.recommendations_collection_id ?? null,
             category_recommendations_enabled: user.category_recommendations_enabled ?? false,
+            show_adult_items: user.show_adult_items ?? false,
         };
 
         res.status(200).json({ preferences });
@@ -43,22 +44,22 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { recommendations_enabled, recommendations_collection_id, category_recommendations_enabled } = req.body as UpdateUserPreferencesInput;
+    const { recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items } = req.body as UpdateUserPreferencesInput;
 
     try {
         // If a collection ID is provided, verify the user owns it or has access
         if (recommendations_collection_id !== undefined && recommendations_collection_id !== null) {
             const collectionCheck = await sql`
-                SELECT id FROM collections 
-                WHERE id = ${recommendations_collection_id} 
+                SELECT id FROM collections
+                WHERE id = ${recommendations_collection_id}
                 AND (owner_id = ${req.userId} OR id IN (
                     SELECT collection_id FROM collection_collaborators WHERE user_id = ${req.userId}
                 ))
             `;
 
             if (collectionCheck.length === 0) {
-                return res.status(400).json({ 
-                    message: "Invalid collection: You don't have access to this collection" 
+                return res.status(400).json({
+                    message: "Invalid collection: You don't have access to this collection"
                 });
             }
         }
@@ -67,15 +68,16 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const hasRecommendationsEnabled = recommendations_enabled !== undefined;
         const hasCollectionId = recommendations_collection_id !== undefined;
         const hasCategoryRecommendations = category_recommendations_enabled !== undefined;
+        const hasShowAdultItems = show_adult_items !== undefined;
 
-        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations) {
+        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations && !hasShowAdultItems) {
             return res.status(400).json({ message: "No valid fields to update" });
         }
 
         // Get current values first
         const currentResult = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled 
-            FROM "user" 
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
+            FROM "user"
             WHERE id = ${req.userId}
         `;
 
@@ -89,16 +91,18 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const newRecommendationsEnabled = hasRecommendationsEnabled ? recommendations_enabled : current.recommendations_enabled;
         const newCollectionId = hasCollectionId ? recommendations_collection_id : current.recommendations_collection_id;
         const newCategoryRecommendations = hasCategoryRecommendations ? category_recommendations_enabled : current.category_recommendations_enabled;
+        const newShowAdultItems = hasShowAdultItems ? show_adult_items : current.show_adult_items;
 
         // Update all fields
         const result = await sql`
-            UPDATE "user" 
+            UPDATE "user"
             SET recommendations_enabled = ${newRecommendationsEnabled},
                 recommendations_collection_id = ${newCollectionId},
                 category_recommendations_enabled = ${newCategoryRecommendations},
+                show_adult_items = ${newShowAdultItems},
                 updated_at = NOW()
             WHERE id = ${req.userId}
-            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled
+            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
         `;
 
         if (result.length === 0) {
@@ -113,6 +117,7 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
             recommendations_enabled: updatedUser.recommendations_enabled ?? false,
             recommendations_collection_id: updatedUser.recommendations_collection_id ?? null,
             category_recommendations_enabled: updatedUser.category_recommendations_enabled ?? false,
+            show_adult_items: updatedUser.show_adult_items ?? true,
         };
 
         res.status(200).json({ preferences });

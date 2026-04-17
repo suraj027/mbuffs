@@ -360,7 +360,6 @@ export const fetchRecentContentApi = async (page = 1, region = 'US', timezone: s
                     'primary_release_date.gte': minDate,
                     'primary_release_date.lte': maxDate,
                     watch_region: region,
-                    include_adult: true,
                     with_watch_providers: '8|119|350|2336|11' // Major streaming providers
                 }
             }),
@@ -381,7 +380,6 @@ export const fetchRecentContentApi = async (page = 1, region = 'US', timezone: s
                     'air_date.gte': minDate,
                     'air_date.lte': maxDate,
                     watch_region: region,
-                    include_adult: true,
                     with_watch_providers: '8|119|350|2336|11' // Major streaming providers
                 }
             }),
@@ -529,20 +527,19 @@ export const fetchPopularMoviesApi = async (pageToFetch: number = 1): Promise<Se
     const movieGenres = '28|12|16|80|53|878|9648|27'; // Default genres for movies
     const tvGenres = '10759|16|80|9648|10765'; // Default genres for TV shows
     const watchRegion = 'US'; // Default watch region
-    const includeAdult = true; // Default value for include_adult
 
     try {
         const movieData = await fetchBackend(`/content`, {
             method: 'POST',
             body: JSON.stringify({
-                endpoint: `/discover/movie?include_adult=${includeAdult}&include_video=${includeVideo}&page=${page}&sort_by=${sortBy}&with_watch_providers=${movieWatchProviders}&with_genres=${movieGenres}&primary_release_date.gte=${minDate}&primary_release_date.lte=${maxDate}&watch_region=${watchRegion}`,
+                endpoint: `/discover/movie?include_video=${includeVideo}&page=${page}&sort_by=${sortBy}&with_watch_providers=${movieWatchProviders}&with_genres=${movieGenres}&primary_release_date.gte=${minDate}&primary_release_date.lte=${maxDate}&watch_region=${watchRegion}`,
             }),
         });
 
         const tvData = await fetchBackend(`/content`, {
             method: 'POST',
             body: JSON.stringify({
-                endpoint: `/discover/tv?include_adult=${includeAdult}&include_video=${includeVideo}&page=${page}&sort_by=${sortBy}&with_watch_providers=${tvWatchProviders}&with_genres=${tvGenres}&first_air_date.gte=${minDate}&first_air_date.lte=${maxDate}&watch_region=${watchRegion}`,
+                endpoint: `/discover/tv?include_video=${includeVideo}&page=${page}&sort_by=${sortBy}&with_watch_providers=${tvWatchProviders}&with_genres=${tvGenres}&first_air_date.gte=${minDate}&first_air_date.lte=${maxDate}&watch_region=${watchRegion}`,
             }),
         });
 
@@ -812,7 +809,6 @@ export const fetchMoviesByGenreApi = async (genreId: number, page = 1): Promise<
                     'vote_count.gte': '100',
                     'vote_average.gte': '5.5',
                     page: String(page),
-                    include_adult: 'true',
                 },
             }),
         });
@@ -837,7 +833,6 @@ export const fetchTvByGenreApi = async (genreId: number, page = 1): Promise<Sear
                     'vote_count.gte': '100',
                     'vote_average.gte': '5.5',
                     page: String(page),
-                    include_adult: 'true',
                 },
             }),
         });

@@ -266,12 +266,14 @@ export interface UserPreferences {
   recommendations_collection_ids?: string[];
   // Category recommendations toggle
   category_recommendations_enabled: boolean;
+  show_adult_items: boolean;
 }
 
 export interface UpdateUserPreferencesInput {
   recommendations_enabled?: boolean;
   recommendations_collection_id?: string | null;
   category_recommendations_enabled?: boolean;
+  show_adult_items?: boolean;
 }
 
 // --- Recommendation Types ---

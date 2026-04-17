@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2 } from 'lucide-react';
+import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2, ShieldAlert } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
 import { getForYouRecommendationsQueryKey, getPreferencesQueryKey, getSharedForYouInfiniteQueryOptions } from '@/lib/recommendationQueries';
@@ -234,6 +234,20 @@ const Profile = () => {
         });
     };
 
+    const handleToggleShowAdultItems = (enabled: boolean) => {
+        updatePreferencesMutation.mutate(
+            { show_adult_items: enabled },
+            {
+                onSuccess: () => {
+                    if (!user?.id) return;
+                    // Adult filter is enforced server-side and affects every TMDB-backed list.
+                    // Blow away cached content so users see results refiltered on next fetch.
+                    queryClient.invalidateQueries();
+                },
+            }
+        );
+    };
+
     const handleCollectionToggle = (collectionId: string, isChecked: boolean) => {
         const currentIds = recommendationCollectionsData?.collections.map(c => c.id) || [];
         let newIds: string[];
@@ -343,6 +357,7 @@ const Profile = () => {
 
     const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
     const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
+    const showAdultItems = preferencesData?.preferences?.show_adult_items ?? false;
     const selectedCollectionIds = new Set(recommendationCollectionsData?.collections.map(c => c.id) || []);
     const isLoading = isLoadingCollections || isLoadingRecommendationCollections || isLoadingPreferences;
     const watchedItemsCount = watchedItemsData?.items.length ?? 0;
@@ -601,6 +616,37 @@ const Profile = () => {
                         )}
 
 
+                    </CardContent>
+                </Card>
+
+                {/* Content Settings Card */}
+                <Card className="mt-6">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <ShieldAlert className="h-5 w-5" />
+                            Content
+                        </CardTitle>
+                        <CardDescription>
+                            Control what kinds of titles appear across the app.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="space-y-0.5">
+                                <Label htmlFor="show-adult-items-toggle" className="text-base">
+                                    Show adult items
+                                </Label>
+                                <p className="text-sm text-muted-foreground">
+                                    When off, TMDB-flagged adult titles are hidden from collections, recommendations, categories, and search.
+                                </p>
+                            </div>
+                            <Switch
+                                id="show-adult-items-toggle"
+                                checked={showAdultItems}
+                                onCheckedChange={handleToggleShowAdultItems}
+                                disabled={isLoadingPreferences}
+                            />
+                        </div>
                     </CardContent>
                 </Card>
 
