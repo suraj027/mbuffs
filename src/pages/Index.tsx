@@ -13,10 +13,9 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { UserPreferences } from '@/lib/types';
 import {
-  FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE,
-  FOR_YOU_PREVIEW_ITEMS_PER_PAGE,
-  getForYouInfiniteQueryOptions,
   getPreferencesQueryKey,
+  getSharedForYouInfiniteQueryOptions,
+  selectForYouPreviewRecommendations,
 } from '@/lib/recommendationQueries';
 
 const TRENDING_CONTENT_QUERY_KEY = ['content', 'trending'];
@@ -54,20 +53,16 @@ const Index = () => {
     data: recommendationsData,
     isLoading: isRecommendationsLoading,
   } = useInfiniteQuery({
-    ...getForYouInfiniteQueryOptions(user?.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE),
+    ...getSharedForYouInfiniteQueryOptions(user?.id),
     enabled: !!user && recommendationsEnabled,
   });
 
   const trendingContent = trendingContentData?.results?.slice(0, 50) || [];
   const firstRecommendationsPage = recommendationsData?.pages?.[0];
-  const recommendations = useMemo(() => {
-    const pageResults = firstRecommendationsPage?.results ?? [];
-    const deduplicatedResults = pageResults.filter(
-      (movie, index, self) => self.findIndex((candidate) => candidate.id === movie.id) === index
-    );
-
-    return deduplicatedResults.slice(0, FOR_YOU_PREVIEW_ITEMS_PER_PAGE);
-  }, [firstRecommendationsPage]);
+  const recommendations = useMemo(
+    () => selectForYouPreviewRecommendations(firstRecommendationsPage?.results ?? []),
+    [firstRecommendationsPage]
+  );
   const hasRecommendations = recommendationsEnabled && recommendations.length > 0;
 
   // Generate media IDs for watched status lookup (recommendations only)

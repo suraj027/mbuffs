@@ -11,7 +11,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
-import { FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE, getForYouInfiniteQueryOptions, getPreferencesQueryKey } from "@/lib/recommendationQueries";
+import {
+  dedupeForYouRecommendations,
+  getPreferencesQueryKey,
+  getSharedForYouInfiniteQueryOptions,
+} from "@/lib/recommendationQueries";
 
 const INITIAL_LOADING_SKELETON_COUNT = 24;
 const INFINITE_SCROLL_SKELETON_COUNT = 12;
@@ -37,14 +41,12 @@ const ForYou = () => {
     hasNextPage,
     fetchNextPage,
   } = useInfiniteQuery({
-    ...getForYouInfiniteQueryOptions(user?.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE),
+    ...getSharedForYouInfiniteQueryOptions(user?.id),
     enabled: !!user && recommendationsEnabled,
   });
 
   // Deduplicate movies by ID to prevent showing same items multiple times
-  const allMovies = data?.pages.flatMap(page => page.results).filter((movie, index, self) => 
-    self.findIndex(m => m.id === movie.id) === index
-  ) || [];
+  const allMovies = dedupeForYouRecommendations(data?.pages.flatMap((page) => page.results) ?? []);
   const totalResults = data?.pages[0]?.total_results || 0;
   const sourceCollections = data?.pages[0]?.sourceCollections || [];
   const totalSourceItems = data?.pages[0]?.totalSourceItems || 0;

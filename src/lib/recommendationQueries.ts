@@ -17,7 +17,7 @@ export const getForYouRecommendationsPageQueryKey = (
   limit: number = FOR_YOU_PREVIEW_ITEMS_PER_PAGE,
 ) => [...getForYouRecommendationsQueryKey(userId), limit] as const;
 
-export const getForYouInfiniteQueryOptions = (
+const getForYouInfiniteQueryOptions = (
   userId?: string | null,
   limit: number = FOR_YOU_PREVIEW_ITEMS_PER_PAGE,
 ) => ({
@@ -32,3 +32,31 @@ export const getForYouInfiniteQueryOptions = (
   },
   staleTime: FOR_YOU_QUERY_STALE_TIME,
 });
+
+type RecommendationWithId = { id: number };
+
+export const dedupeForYouRecommendations = <T extends RecommendationWithId>(
+  recommendations: T[],
+): T[] => {
+  const seenIds = new Set<number>();
+  const deduplicated: T[] = [];
+
+  for (const recommendation of recommendations) {
+    if (seenIds.has(recommendation.id)) {
+      continue;
+    }
+
+    seenIds.add(recommendation.id);
+    deduplicated.push(recommendation);
+  }
+
+  return deduplicated;
+};
+
+export const selectForYouPreviewRecommendations = <T extends RecommendationWithId>(
+  recommendations: T[],
+  previewLimit: number = FOR_YOU_PREVIEW_ITEMS_PER_PAGE,
+): T[] => dedupeForYouRecommendations(recommendations).slice(0, previewLimit);
+
+export const getSharedForYouInfiniteQueryOptions = (userId?: string | null) =>
+  getForYouInfiniteQueryOptions(userId, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE);

@@ -8,7 +8,7 @@ import { useAuth } from './hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast"; // Import the correct useToast
 import { fetchUserPreferencesApi } from '@/lib/api';
-import { FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE, FOR_YOU_QUERY_STALE_TIME, getForYouInfiniteQueryOptions, getPreferencesQueryKey } from '@/lib/recommendationQueries';
+import { FOR_YOU_QUERY_STALE_TIME, getPreferencesQueryKey, getSharedForYouInfiniteQueryOptions } from '@/lib/recommendationQueries';
 
 const Index = lazy(() => import("./pages/Index"));
 const Search = lazy(() => import("./pages/Search"));
@@ -84,7 +84,7 @@ const AppPrefetchers = () => {
           return;
         }
 
-        await queryClient.prefetchInfiniteQuery(getForYouInfiniteQueryOptions(user.id, FOR_YOU_FULL_PAGE_ITEMS_PER_PAGE));
+        await queryClient.prefetchInfiniteQuery(getSharedForYouInfiniteQueryOptions(user.id));
 
         if (!isCancelled) {
           prefetchedForUserRef.current = user.id;
