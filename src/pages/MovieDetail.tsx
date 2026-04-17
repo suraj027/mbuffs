@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchMovieDetailsApi, fetchTvDetailsApi, fetchVideosApi, fetchCreditsApi, fetchPersonCreditsApi, fetchUserCollectionsApi, fetchCollectionDetailsApi, addMovieToCollectionApi, removeMovieFromCollectionApi, getImageUrl, fetchUserRegion, fetchTmdbCollectionDetailsApi, fetchCombinedRatingsApi, getWatchedStatusApi, toggleWatchedStatusApi, getNotInterestedStatusApi, toggleNotInterestedStatusApi, fetchUserPreferencesApi } from '@/lib/api';
-import { MovieDetails, Network, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse, UserPreferences } from '@/lib/types';
+import { MovieDetails, Network, ProductionCompany, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,27 @@ function NetworkBadge({ network }: { network: Network }) {
             ) : (
                 <span className="text-xs font-medium text-foreground/70">{network.name}</span>
             )}
+        </div>
+    );
+}
+
+function ProductionList({ title, companies }: { title: string, companies: ProductionCompany[] | undefined }) {
+    const withLogo = companies?.filter(c => c.logo_path) ?? [];
+    if (withLogo.length === 0) return null;
+    return (
+        <div className="flex flex-col gap-2 items-center md:items-start">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</span>
+            <div className="flex flex-wrap justify-center md:justify-start gap-3">
+                {withLogo.map(c => (
+                    <div key={c.id} className="relative group" title={c.name}>
+                        <img
+                            src={`${TMDB_LOGO_BASE}${c.logo_path}`}
+                            alt={c.name}
+                            className="w-10 h-10 rounded-md shadow-md border border-border/60 bg-white object-contain p-1 transition-transform group-hover:scale-105"
+                        />
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
@@ -536,6 +557,7 @@ const MovieDetail = () => {
     const rating = mediaDetails.vote_average?.toFixed(1);
     const tagline = mediaDetails.tagline;
     const networks = mediaDetails.networks ?? [];
+    const primaryStudio = mediaDetails.production_companies?.find(c => c.logo_path) ?? null;
 
     const watchProviders = mediaDetails['watch/providers']?.results?.[userRegion || 'US'];
 
@@ -649,17 +671,31 @@ const MovieDetail = () => {
                             </div>
                         )}
 
-                        {/* Watch Providers */}
-                        {watchProviders && (
-                            <div className="pt-4 space-y-4">
-                                {watchProviders.flatrate && watchProviders.flatrate.length > 0 ? (
-                                    <ProviderList title="Stream" providers={watchProviders.flatrate} />
-                                ) : (
-                                    <div className="flex flex-wrap justify-center md:justify-start gap-x-8 gap-y-4">
-                                        <ProviderList title="Rent" providers={watchProviders.rent} />
-                                        <ProviderList title="Buy" providers={watchProviders.buy} />
-                                    </div>
-                                )}
+                        {/* Studio — mobile only (below director) */}
+                        {primaryStudio && (
+                            <div className="pt-2 flex justify-center md:hidden">
+                                <ProductionList title="Studio" companies={[primaryStudio]} />
+                            </div>
+                        )}
+
+                        {/* Watch Providers & Studio (desktop) */}
+                        {(watchProviders || primaryStudio) && (
+                            <div className="pt-4">
+                                <div className="flex flex-wrap justify-center md:justify-start gap-x-8 gap-y-4">
+                                    {watchProviders?.flatrate && watchProviders.flatrate.length > 0 ? (
+                                        <ProviderList title="Stream" providers={watchProviders.flatrate} />
+                                    ) : (
+                                        <>
+                                            <ProviderList title="Rent" providers={watchProviders?.rent} />
+                                            <ProviderList title="Buy" providers={watchProviders?.buy} />
+                                        </>
+                                    )}
+                                    {primaryStudio && (
+                                        <div className="hidden md:block">
+                                            <ProductionList title="Studio" companies={[primaryStudio]} />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 

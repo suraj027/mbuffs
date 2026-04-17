@@ -6,6 +6,13 @@ export interface Network {
   origin_country: string;
 }
 
+export interface ProductionCompany {
+  id: number;
+  logo_path: string | null;
+  name: string;
+  origin_country: string;
+}
+
 export interface Movie {
   id: number;
   title: string;
@@ -111,6 +118,7 @@ export interface MovieDetails extends Movie {
   runtime: number;
   tagline: string;
   networks: Network[];
+  production_companies?: ProductionCompany[];
   created_by?: Creator[]; // For TV shows
   seasons?: Season[]; // For TV shows
   belongs_to_collection?: BelongsToCollection | null;
