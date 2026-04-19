@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useRef } from 'react';
 import { Toaster } from "@/components/ui/toaster"; // Keep this Toaster
 import { Toaster as Sonner } from "@/components/ui/sonner"; // Keep Sonner
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { BottomNav } from "@/components/BottomNav";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigationType } from "react-router-dom";
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
@@ -198,6 +199,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
+        <BottomNav />
       </AuthProvider>
     </BrowserRouter>
   </TooltipProvider>

@@ -65,6 +65,12 @@ export const Navbar = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  useEffect(() => {
+    const handleOpenSearch = () => setSearchOpen(true);
+    window.addEventListener('open-search', handleOpenSearch);
+    return () => window.removeEventListener('open-search', handleOpenSearch);
+  }, []);
+
   const { data: searchResultsData, isLoading: isSearching } = useQuery({
     queryKey: ['multi-search', 'navbar', normalizedSearch],
     queryFn: () => searchMultiApi(normalizedSearch),
@@ -250,11 +256,11 @@ export const Navbar = () => {
         {/* Search and User Actions */}
         <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4">
           <div className="flex items-center gap-3 ml-auto">
-            {/* Search icon */}
+            {/* Search icon (desktop only — mobile uses bottom nav) */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-full bg-muted/70 backdrop-blur-md border border-border hover:bg-muted"
+              className="hidden md:inline-flex h-9 w-9 rounded-full bg-muted/70 backdrop-blur-md border border-border hover:bg-muted"
               onClick={() => setSearchOpen(true)}
               aria-label="Open search"
             >
