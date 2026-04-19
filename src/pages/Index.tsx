@@ -91,7 +91,7 @@ const Index = () => {
       <Navbar />
       <main className="container py-6 md:py-10">
         {/* Hero Section */}
-        <section className="relative mb-12 md:mb-16">
+        <section className="relative mb-6 md:mb-16">
           {/* Subtle gradient orb behind the text */}
           <div className="absolute -top-20 -left-20 w-72 h-72 bg-primary/6 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -top-10 left-40 w-48 h-48 bg-muted/30 rounded-full blur-3xl pointer-events-none" />

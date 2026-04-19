@@ -227,6 +227,13 @@
     font-feature-settings:
       "rlig" 1,
       "calt" 1;
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+
+  @media (width >= 768px) {
+    body {
+      padding-bottom: 0;
+    }
   }
 }
 
