@@ -1,5 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { Home, LayoutGrid, Search, Sparkles, User } from 'lucide-react';
+import { haptics } from '@/lib/haptics';
 
 const HIDDEN_PATHS = ['/login'];
 
@@ -20,7 +21,14 @@ export const BottomNav = () => {
 
   const handleSearchClick = (event: React.MouseEvent) => {
     event.preventDefault();
+    haptics.trigger('medium');
     window.dispatchEvent(new Event('open-search'));
+  };
+
+  const handleTabClick = (targetPath: string) => () => {
+    if (location.pathname !== targetPath) {
+      haptics.trigger('selection');
+    }
   };
 
   return (
@@ -53,6 +61,7 @@ export const BottomNav = () => {
               <NavLink
                 to={tab.to}
                 end={tab.end}
+                onClick={handleTabClick(tab.to)}
                 className={({ isActive }) =>
                   `flex h-full w-full flex-col items-center justify-center gap-1 transition-colors active:scale-95 ${
                     isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
