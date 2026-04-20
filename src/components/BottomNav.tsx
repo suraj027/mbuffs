@@ -1,13 +1,21 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, LayoutGrid, Search, Sparkles, User } from 'lucide-react';
+import { Home, LayoutGrid, Search, Sparkles, User, type LucideIcon } from 'lucide-react';
 import { haptics } from '@/lib/haptics';
 
 const HIDDEN_PATHS = ['/login'];
 
-const tabs = [
+type Tab = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  action?: 'search';
+};
+
+const tabs: Tab[] = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/categories', label: 'Categories', icon: LayoutGrid },
-  { to: 'search', label: 'Search', icon: Search, action: 'search' as const },
+  { to: 'search', label: 'Search', icon: Search, action: 'search' },
   { to: '/for-you', label: 'For You', icon: Sparkles },
   { to: '/profile', label: 'Profile', icon: User },
 ];
