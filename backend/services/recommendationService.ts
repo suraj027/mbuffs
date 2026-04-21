@@ -220,8 +220,8 @@ const recommendationCacheLocks = new Map<string, Promise<void>>();
 
 // Reddit boost configuration
 const REDDIT_BOOST_ENABLED = true;
-const REDDIT_BOOST_MULTIPLIER = 15; // Points per mention
-const REDDIT_POSITIVE_SENTIMENT_BONUS = 10;
+const REDDIT_BOOST_MULTIPLIER = 30; // Points per mention
+const REDDIT_POSITIVE_SENTIMENT_BONUS = 20;
 const MIN_THEATRICAL_TMDB_PAGES_TO_FETCH = 3;
 const MAX_THEATRICAL_TMDB_PAGES_TO_FETCH = 12;
 
@@ -288,7 +288,7 @@ function calculateRedditBoost(
     }
     
     // Cap boost at a reasonable max to avoid overwhelming other signals
-    boost = Math.min(boost, 100);
+    boost = Math.min(boost, 200);
 
     return {
         boost,
@@ -707,6 +707,8 @@ function applyMultiObjectiveRanking(
         const popularityNorm = logNormalize(candidate.item.popularity, 600);
         const voteCountNorm = logNormalize(candidate.item.vote_count, 12000);
         const sourceNorm = clamp(candidate.sources / 5, 0, 1);
+        // NOTE: Divisor kept at 100 intentionally - movies reach max CTR influence at boost=100.
+        // To scale proportionally with the 200 cap, change to `/200`.
         const redditNorm = clamp(safeNumber(scoreBreakdown?.reddit_boost) / 100, 0, 1);
 
         const genreAffinityRaw = (candidate.item.genre_ids || []).reduce((sum, genreId) => {
