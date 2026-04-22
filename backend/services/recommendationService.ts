@@ -1,7 +1,7 @@
 import { sql } from '../lib/db.js';
 import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getRedditRecommendations } from './redditService.js';
+import { getRedditRecommendations, getRedditPrimaryCandidates, type RedditPrimaryCandidate } from './redditService.js';
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
@@ -98,7 +98,8 @@ type RetrievalChannel =
     | 'discover_supplement'
     | 'trending_explore'
     | 'cold_start_seed'
-    | 'reddit_signal';
+    | 'reddit_signal'
+    | 'reddit_primary';
 
 interface RecommendationCandidate {
     item: TMDBMovie;
@@ -245,7 +246,7 @@ async function getRedditBoostMap(): Promise<Map<string, { mentions: number; sent
     try {
         const redditRecs = await getRedditRecommendations({
             minMentions: 1,
-            limit: 500,
+            limit: 5000,
             onlyWithTmdb: true,
         });
 
@@ -2312,6 +2313,96 @@ export async function generateRecommendations(
             }
         });
     });
+
+    // =========================================================================
+    // STEP: Inject Reddit-sourced candidates as primary recommendations
+    // =========================================================================
+    // These are items highly mentioned on Reddit that may not appear in TMDB's
+    // recommendation/similar graphs. We fetch them with full TMDB details and
+    // inject them directly into the candidate pool.
+    
+    // Build set of IDs already in pool to pass to Reddit function
+    const pooledIds = new Set<string>();
+    for (const key of allRecommendations.keys()) {
+        pooledIds.add(key);
+    }
+    // Also add user's excluded movies
+    for (const id of existingMovieIds) {
+        pooledIds.add(id);
+    }
+
+    const redditPrimaryCandidates = await getRedditPrimaryCandidates({
+        excludedIds: pooledIds,
+        limit: 100,
+        minMentions: 2,
+        minScore: 50,
+    });
+
+    for (const redditCandidate of redditPrimaryCandidates) {
+        const item = redditCandidate.item;
+        const key = item.media_type === 'tv' ? `${item.id}tv` : `${item.id}`;
+
+        if (allRecommendations.has(key)) {
+            // Item already exists from TMDB - add Reddit channel and boost
+            const existing = allRecommendations.get(key)!;
+            existing.sources += 1;
+            
+            const explainability = existing.item.explainability;
+            if (explainability) {
+                explainability.retrieval_channels = addRetrievalChannel(
+                    explainability.retrieval_channels,
+                    'reddit_primary'
+                );
+                explainability.reason_codes = addReasonCode(
+                    explainability.reason_codes,
+                    'reddit_popular'
+                );
+                explainability.reddit_mentions = redditCandidate.redditData.mentionCount;
+                explainability.reddit_sentiment = redditCandidate.redditData.sentiment || undefined;
+            }
+        } else {
+            // New item from Reddit - create full candidate with explainability
+            const baseScore = (item.vote_average || 0) * 10;
+            const popularityScore = Math.min((item.popularity || 0) / 10, 50);
+            
+            let redditBoostScore = redditCandidate.redditData.mentionCount * REDDIT_BOOST_MULTIPLIER;
+            if (redditCandidate.redditData.sentiment === 'positive') {
+                redditBoostScore += REDDIT_POSITIVE_SENTIMENT_BONUS;
+            }
+            redditBoostScore = Math.min(redditBoostScore, 200);
+
+            const totalScore = baseScore + popularityScore + redditBoostScore;
+
+            allRecommendations.set(key, {
+                item: {
+                    ...item,
+                    explainability: {
+                        reason_codes: ['reddit_popular'],
+                        source_appearances: 1,
+                        matched_genres: item.genre_ids || [],
+                        retrieval_channels: ['reddit_primary'],
+                        reddit_mentions: redditCandidate.redditData.mentionCount,
+                        reddit_sentiment: redditCandidate.redditData.sentiment || undefined,
+                        score_breakdown: {
+                            base: baseScore,
+                            popularity: popularityScore,
+                            genre: 0,
+                            source_boost: 0,
+                            director_boost: 0,
+                            actor_boost: 0,
+                            primary_boost: 0,
+                            reddit_boost: redditBoostScore,
+                            total: totalScore,
+                        },
+                    },
+                } as TMDBMovie,
+                score: totalScore,
+                sources: 1,
+            });
+        }
+    }
+
+    console.log(`[Reddit Primary] Injected ${redditPrimaryCandidates.length} Reddit primary candidates into pool (total pool: ${allRecommendations.size})`);
     
     // Apply Reddit popularity boosts to recommendations
     const redditBoostMap = await getRedditBoostMap();

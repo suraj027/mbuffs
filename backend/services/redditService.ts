@@ -616,7 +616,7 @@ export async function scrapeRedditForRecommendations(
     // Sort by count * score (most mentioned + upvoted first)
     const sortedMentions = Array.from(allMentions.entries())
         .sort((a, b) => (b[1].count * b[1].totalScore) - (a[1].count * a[1].totalScore))
-        .slice(0, 100); // Limit to top 100 to avoid too many TMDB calls
+        .slice(0, 1000); // Limit to top 1000 to avoid too many TMDB calls
 
     for (const [_key, data] of sortedMentions) {
         // Search TMDB for this title
@@ -865,4 +865,199 @@ export async function refreshRedditRecommendations(
     }
     
     return result;
+}
+
+// ============================================================================
+// REDDIT PRIMARY CANDIDATES FOR RECOMMENDATION ENGINE
+// ============================================================================
+
+/**
+ * TMDB movie/TV details structure (matches recommendationService TMDBMovie)
+ */
+export interface TMDBMovieDetails {
+    id: number;
+    media_type: 'movie' | 'tv';
+    title?: string;
+    name?: string;
+    poster_path: string | null;
+    release_date?: string;
+    first_air_date?: string;
+    vote_average: number;
+    vote_count?: number;
+    popularity?: number;
+    overview: string;
+    backdrop_path: string | null;
+    genre_ids?: number[];
+}
+
+/**
+ * Reddit primary candidate structure for the recommendation engine
+ */
+export interface RedditPrimaryCandidate {
+    item: TMDBMovieDetails;
+    score: number;
+    sources: number;
+    redditData: {
+        mentionCount: number;
+        totalScore: number;
+        sentiment: 'positive' | 'neutral' | 'negative' | null;
+        subreddit: string;
+    };
+}
+
+/**
+ * Fetch TMDB movie/TV details by ID
+ */
+async function fetchTMDBDetails(
+    tmdbId: string,
+    mediaType: 'movie' | 'tv'
+): Promise<TMDBMovieDetails | null> {
+    const TMDB_API_KEY = process.env.TMDB_API_KEY;
+    const TMDB_BASE_URL = process.env.TMDB_BASE_URL;
+
+    if (!TMDB_API_KEY || !TMDB_BASE_URL) {
+        return null;
+    }
+
+    try {
+        const url = new URL(`${TMDB_BASE_URL}/${mediaType}/${tmdbId}`);
+        url.searchParams.append('api_key', TMDB_API_KEY);
+        url.searchParams.append('language', 'en-US');
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+            return null;
+        }
+
+        const data = await response.json() as Record<string, unknown>;
+        
+        // Convert genres array to genre_ids
+        const genres = data.genres as Array<{ id: number; name: string }> | undefined;
+        const genre_ids = genres?.map(g => g.id) || [];
+
+        return {
+            id: data.id as number,
+            media_type: mediaType,
+            title: data.title as string | undefined,
+            name: data.name as string | undefined,
+            poster_path: data.poster_path as string | null,
+            release_date: data.release_date as string | undefined,
+            first_air_date: data.first_air_date as string | undefined,
+            vote_average: (data.vote_average as number) || 0,
+            vote_count: data.vote_count as number | undefined,
+            popularity: data.popularity as number | undefined,
+            overview: (data.overview as string) || '',
+            backdrop_path: data.backdrop_path as string | null,
+            genre_ids,
+        };
+    } catch (error) {
+        console.error(`Error fetching TMDB details for ${mediaType}/${tmdbId}:`, error);
+        return null;
+    }
+}
+
+/**
+ * Get Reddit recommendations as primary candidates for the recommendation engine.
+ * This fetches full TMDB details for each Reddit recommendation so they can be
+ * injected directly into the recommendation candidate pool.
+ * 
+ * @param excludedIds - Set of TMDB IDs (as strings) to exclude (already in user's collections)
+ * @param limit - Maximum number of candidates to return
+ * @param minMentions - Minimum Reddit mentions required
+ * @param minScore - Minimum Reddit score required
+ */
+export async function getRedditPrimaryCandidates(options: {
+    excludedIds?: Set<string>;
+    limit?: number;
+    minMentions?: number;
+    minScore?: number;
+}): Promise<RedditPrimaryCandidate[]> {
+    const {
+        excludedIds = new Set(),
+        limit = 100,
+        minMentions = 2,
+        minScore = 50,
+    } = options;
+
+    try {
+        // 1. Fetch Reddit recommendations with TMDB IDs
+        const redditRecs = await getRedditRecommendations({
+            minMentions,
+            minScore,
+            onlyWithTmdb: true,
+            limit: limit * 2, // Fetch extra to account for exclusions and failed fetches
+        });
+
+        if (redditRecs.length === 0) {
+            return [];
+        }
+
+        // 2. Filter out excluded items and items without tmdbId
+        const filteredRecs = redditRecs.filter(rec => {
+            if (!rec.tmdbId) return false;
+            const key = `${rec.tmdbId}${rec.mediaType === 'tv' ? 'tv' : ''}`;
+            return !excludedIds.has(key) && !excludedIds.has(rec.tmdbId);
+        });
+
+        // 3. Batch fetch TMDB details with rate limiting
+        const candidates: RedditPrimaryCandidate[] = [];
+        const BATCH_SIZE = 10;
+        const BATCH_DELAY_MS = 250; // Rate limit: ~40 requests/second
+
+        for (let i = 0; i < filteredRecs.length && candidates.length < limit; i += BATCH_SIZE) {
+            const batch = filteredRecs.slice(i, i + BATCH_SIZE);
+            
+            const batchPromises = batch.map(async (rec) => {
+                if (!rec.tmdbId) return null;
+                
+                const details = await fetchTMDBDetails(rec.tmdbId, rec.mediaType);
+                if (!details) return null;
+
+                // Calculate score based on Reddit signals
+                const REDDIT_MENTION_MULTIPLIER = 30;
+                const REDDIT_POSITIVE_BONUS = 20;
+                const BASE_SCORE = (details.vote_average || 0) * 10;
+                const POPULARITY_SCORE = Math.min((details.popularity || 0) / 10, 50);
+                
+                let redditScore = rec.mentionCount * REDDIT_MENTION_MULTIPLIER;
+                if (rec.sentiment === 'positive') {
+                    redditScore += REDDIT_POSITIVE_BONUS;
+                }
+                redditScore = Math.min(redditScore, 200); // Cap Reddit boost
+
+                const totalScore = BASE_SCORE + POPULARITY_SCORE + redditScore;
+
+                return {
+                    item: details,
+                    score: totalScore,
+                    sources: 1,
+                    redditData: {
+                        mentionCount: rec.mentionCount,
+                        totalScore: rec.totalScore,
+                        sentiment: rec.sentiment,
+                        subreddit: rec.subreddit,
+                    },
+                } as RedditPrimaryCandidate;
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            
+            for (const result of batchResults) {
+                if (result && candidates.length < limit) {
+                    candidates.push(result);
+                }
+            }
+
+            // Rate limit between batches
+            if (i + BATCH_SIZE < filteredRecs.length && candidates.length < limit) {
+                await sleep(BATCH_DELAY_MS);
+            }
+        }
+
+        console.log(`[Reddit Primary] Fetched ${candidates.length} primary candidates from Reddit`);
+        return candidates;
+    } catch (error) {
+        console.error('Error getting Reddit primary candidates:', error);
+        return [];
+    }
 }
