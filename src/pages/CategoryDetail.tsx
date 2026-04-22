@@ -4,12 +4,11 @@ import { useEffect, useRef, useCallback, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
 import { MovieCard } from "@/components/MovieCard";
 import { 
+  fetchCategoryRecommendationsApi,
   fetchGenreListApi, 
   fetchMoviesByGenreApi, 
   fetchTvByGenreApi, 
   fetchNowPlayingMoviesApi,
-  fetchGenreRecommendationsApi,
-  fetchTheatricalRecommendationsApi,
   fetchUserPreferencesApi
 } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,10 +18,16 @@ import { ChevronLeft, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
-import { UserPreferences } from "@/lib/types";
-import { getPreferencesQueryKey } from "@/lib/recommendationQueries";
-
-const PERSONALIZED_ITEMS_PER_PAGE = 60;
+import { CategoryRecommendationsResponse, UserPreferences } from "@/lib/types";
+import {
+  CATEGORY_OVERVIEW_FETCH_LIMIT,
+  dedupeRecommendations,
+  getCategoryRecommendationsOverviewQueryKey,
+  getPreferencesQueryKey,
+  getSharedPersonalizedGenreInfiniteQueryOptions,
+  getSharedPersonalizedTheatricalInfiniteQueryOptions,
+  mergePreviewWithPagedRecommendations,
+} from "@/lib/recommendationQueries";
 
 const CategoryDetail = () => {
   const { mediaType, genreId } = useParams<{ mediaType: 'movie' | 'tv'; genreId: string }>();
@@ -55,6 +60,13 @@ const CategoryDetail = () => {
     ? "Theatrical Releases"
     : (genreData?.genres.find(g => g.id === genreIdNum)?.name || 'Category');
 
+  const { data: categoryOverviewData, isLoading: isLoadingCategoryOverview } = useQuery<CategoryRecommendationsResponse>({
+    queryKey: getCategoryRecommendationsOverviewQueryKey(user?.id, mediaType as 'movie' | 'tv', CATEGORY_OVERVIEW_FETCH_LIMIT),
+    queryFn: () => fetchCategoryRecommendationsApi(mediaType as 'movie' | 'tv', CATEGORY_OVERVIEW_FETCH_LIMIT),
+    staleTime: 1000 * 60 * 10,
+    enabled: showPersonalized && !!user?.id && !!mediaType && !isTheatrical,
+  });
+
   // Infinite query for personalized recommendations
   const {
     data: personalizedData,
@@ -63,21 +75,9 @@ const CategoryDetail = () => {
     hasNextPage: hasNextPagePersonalized,
     fetchNextPage: fetchNextPagePersonalized,
   } = useInfiniteQuery({
-    queryKey: ['recommendations', user?.id ?? null, isTheatrical ? 'theatrical' : 'genre', isTheatrical ? 'all' : genreIdNum, mediaType, 'all', PERSONALIZED_ITEMS_PER_PAGE],
-    queryFn: ({ pageParam = 1 }) => {
-      if (isTheatrical) {
-        return fetchTheatricalRecommendationsApi(PERSONALIZED_ITEMS_PER_PAGE, pageParam);
-      }
-      return fetchGenreRecommendationsApi(genreIdNum, mediaType as 'movie' | 'tv', PERSONALIZED_ITEMS_PER_PAGE, pageParam);
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => {
-      if (lastPage.page < lastPage.total_pages) {
-        return lastPage.page + 1;
-      }
-      return undefined;
-    },
-    staleTime: 1000 * 60 * 5,
+    ...(isTheatrical
+      ? getSharedPersonalizedTheatricalInfiniteQueryOptions(user?.id)
+      : getSharedPersonalizedGenreInfiniteQueryOptions(user?.id, mediaType as 'movie' | 'tv', genreIdNum)),
     enabled: showPersonalized && !!mediaType && (!!genreIdNum || isTheatrical),
   });
 
@@ -111,20 +111,46 @@ const CategoryDetail = () => {
 
   // Use personalized data if available, otherwise default
   const data = showPersonalized ? personalizedData : defaultData;
-  const isLoading = showPersonalized ? isLoadingPersonalized : isLoadingDefault;
   const isFetchingNextPage = showPersonalized ? isFetchingNextPagePersonalized : isFetchingNextPageDefault;
   const hasNextPage = showPersonalized ? hasNextPagePersonalized : hasNextPageDefault;
   const fetchNextPage = showPersonalized ? fetchNextPagePersonalized : fetchNextPageDefault;
 
+  const personalizedSeedResults = useMemo(() => {
+    if (!showPersonalized || isTheatrical) {
+      return [];
+    }
+
+    return categoryOverviewData?.categories.find((category) => category.genre.id === genreIdNum)?.results ?? [];
+  }, [showPersonalized, isTheatrical, categoryOverviewData, genreIdNum]);
+
+  const isLoading = showPersonalized
+    ? isLoadingPersonalized || (!isTheatrical && isLoadingCategoryOverview)
+    : isLoadingDefault;
+
   // Deduplicate movies by ID
-  const allMovies = data?.pages.flatMap(page => page.results).filter((movie, index, self) => 
-    self.findIndex(m => m.id === movie.id) === index
-  ) || [];
-  const totalResults = data?.pages[0]?.total_results || 0;
+  const allMovies = useMemo(
+    () => {
+      const pagedResults = data?.pages.flatMap((page) => page.results) ?? [];
+
+      if (showPersonalized && !isTheatrical && personalizedSeedResults.length > 0) {
+        return mergePreviewWithPagedRecommendations(personalizedSeedResults, pagedResults);
+      }
+
+      return dedupeRecommendations(pagedResults);
+    },
+    [data, showPersonalized, isTheatrical, personalizedSeedResults],
+  );
+  const totalResults = showPersonalized
+    ? (personalizedData?.pages[0]?.total_results || personalizedSeedResults.length)
+    : (defaultData?.pages[0]?.total_results || 0);
 
   // Get source info for personalized results
-  const sourceCollections = showPersonalized ? (personalizedData?.pages[0]?.sourceCollections || []) : [];
-  const totalSourceItems = showPersonalized ? (personalizedData?.pages[0]?.totalSourceItems || 0) : 0;
+  const sourceCollections = showPersonalized
+    ? (personalizedData?.pages[0]?.sourceCollections || categoryOverviewData?.sourceCollections || [])
+    : [];
+  const totalSourceItems = showPersonalized
+    ? (personalizedData?.pages[0]?.totalSourceItems || categoryOverviewData?.totalSourceItems || 0)
+    : 0;
 
   // Generate media IDs for watched status lookup
   const mediaIds = useMemo(() => 

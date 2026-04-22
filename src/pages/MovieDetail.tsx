@@ -15,7 +15,11 @@ import { Separator } from '@/components/ui/separator';
 import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Clock, Calendar, Globe, Share2, X, MessageSquare, ChevronRight, Eye, EyeOff, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { getForYouRecommendationsQueryKey, getPreferencesQueryKey } from '@/lib/recommendationQueries';
+import {
+    getCategoryRecommendationsQueryKey,
+    getForYouRecommendationsQueryKey,
+    getPreferencesQueryKey,
+} from '@/lib/recommendationQueries';
 import { toast } from 'sonner';
 import { ReviewSection } from '@/components/reviews/ReviewSection';
 
@@ -408,6 +412,10 @@ const MovieDetail = () => {
                     queryKey: getForYouRecommendationsQueryKey(currentUser.id),
                     refetchType: 'none',
                 });
+                queryClient.invalidateQueries({
+                    queryKey: getCategoryRecommendationsQueryKey(currentUser.id),
+                    refetchType: 'none',
+                });
             }
         },
         onError: (_error: Error, _, context) => {
@@ -452,6 +460,10 @@ const MovieDetail = () => {
             if (currentUser?.id) {
                 queryClient.invalidateQueries({
                     queryKey: getForYouRecommendationsQueryKey(currentUser.id),
+                    refetchType: 'none',
+                });
+                queryClient.invalidateQueries({
+                    queryKey: getCategoryRecommendationsQueryKey(currentUser.id),
                     refetchType: 'none',
                 });
             }

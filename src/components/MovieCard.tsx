@@ -4,7 +4,11 @@ import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp } from "lucide-re
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getForYouRecommendationsQueryKey, getPreferencesQueryKey } from "@/lib/recommendationQueries";
+import {
+  getCategoryRecommendationsQueryKey,
+  getForYouRecommendationsQueryKey,
+  getPreferencesQueryKey,
+} from "@/lib/recommendationQueries";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
@@ -94,6 +98,10 @@ export function MovieCard({
           queryKey: getForYouRecommendationsQueryKey(user.id),
           refetchType: 'none',
         });
+        queryClient.invalidateQueries({
+          queryKey: getCategoryRecommendationsQueryKey(user.id),
+          refetchType: 'none',
+        });
       }
     },
     onError: (_error: Error, _, context) => {
@@ -123,6 +131,10 @@ export function MovieCard({
       if (user?.id) {
         queryClient.invalidateQueries({
           queryKey: getForYouRecommendationsQueryKey(user.id),
+          refetchType: 'none',
+        });
+        queryClient.invalidateQueries({
+          queryKey: getCategoryRecommendationsQueryKey(user.id),
           refetchType: 'none',
         });
       }

@@ -17,7 +17,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2, ShieldAlert } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
-import { getForYouRecommendationsQueryKey, getPreferencesQueryKey, getSharedForYouInfiniteQueryOptions } from '@/lib/recommendationQueries';
+import {
+    getCategoryRecommendationsQueryKey,
+    getForYouRecommendationsQueryKey,
+    getPreferencesQueryKey,
+    getSharedForYouInfiniteQueryOptions,
+} from '@/lib/recommendationQueries';
 
 // ============================================================================
 // Image helpers
@@ -214,11 +219,13 @@ const Profile = () => {
 
                 if (enabled) {
                     queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+                    queryClient.invalidateQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
                     void queryClient.prefetchInfiniteQuery(getSharedForYouInfiniteQueryOptions(user.id));
                     return;
                 }
 
                 queryClient.removeQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+                queryClient.removeQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
             },
         });
         
@@ -229,9 +236,23 @@ const Profile = () => {
     };
 
     const handleToggleCategoryRecommendations = (enabled: boolean) => {
-        updatePreferencesMutation.mutate({
-            category_recommendations_enabled: enabled,
-        });
+        updatePreferencesMutation.mutate(
+            {
+                category_recommendations_enabled: enabled,
+            },
+            {
+                onSuccess: () => {
+                    if (!user?.id) return;
+
+                    if (enabled) {
+                        queryClient.invalidateQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
+                        return;
+                    }
+
+                    queryClient.removeQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
+                },
+            }
+        );
     };
 
     const handleToggleShowAdultItems = (enabled: boolean) => {

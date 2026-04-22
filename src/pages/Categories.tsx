@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Navbar } from "@/components/Navbar";
 import { GenreRow } from "@/components/GenreRow";
-import { fetchGenreListApi, fetchMoviesByGenreApi, fetchTvByGenreApi, fetchNowPlayingMoviesApi, fetchCategoryRecommendationsApi, fetchUserPreferencesApi, fetchTheatricalRecommendationsApi } from "@/lib/api";
+import { fetchGenreListApi, fetchMoviesByGenreApi, fetchTvByGenreApi, fetchNowPlayingMoviesApi, fetchCategoryRecommendationsApi, fetchUserPreferencesApi } from "@/lib/api";
 import { Genre, CategoryRecommendationsResponse } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,7 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Film, Tv, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Link } from "react-router-dom";
-import { getPreferencesQueryKey } from "@/lib/recommendationQueries";
+import {
+  CATEGORY_OVERVIEW_FETCH_LIMIT,
+  getCategoryRecommendationsOverviewQueryKey,
+  getPreferencesQueryKey,
+  getSharedPersonalizedTheatricalInfiniteQueryOptions,
+  selectCategoryPreviewRecommendations,
+} from "@/lib/recommendationQueries";
 
 // Popular genres to feature (subset for better UX)
 // Movie genres: Horror (27), Thriller (53), Drama (18), Sci-Fi (878), Animation (16), Action (28), Comedy (35), Romance (10749)
@@ -90,7 +96,7 @@ const Categories = () => {
 
           <TabsContent value="movie">
             {showPersonalized ? (
-              <PersonalizedCategoriesContent mediaType="movie" showNotInterested={showPersonalized} />
+              <PersonalizedCategoriesContent userId={user?.id} mediaType="movie" showNotInterested={showPersonalized} />
             ) : (
               <GenreRowsContent mediaType="movie" featuredGenreIds={FEATURED_MOVIE_GENRE_IDS} showNotInterested={false} />
             )}
@@ -98,7 +104,7 @@ const Categories = () => {
 
           <TabsContent value="tv">
             {showPersonalized ? (
-              <PersonalizedCategoriesContent mediaType="tv" showNotInterested={showPersonalized} />
+              <PersonalizedCategoriesContent userId={user?.id} mediaType="tv" showNotInterested={showPersonalized} />
             ) : (
               <GenreRowsContent mediaType="tv" featuredGenreIds={FEATURED_TV_GENRE_IDS} showNotInterested={false} />
             )}
@@ -136,13 +142,12 @@ function CategoriesLoadingSkeleton() {
 
 // Component to render personalized category recommendations
 const DISPLAY_LIMIT = 10;
-const FETCH_LIMIT = 50; // Fetch more to ensure each category has enough after deduplication
-
-function PersonalizedCategoriesContent({ mediaType, showNotInterested }: { mediaType: 'movie' | 'tv'; showNotInterested: boolean }) {
+function PersonalizedCategoriesContent({ userId, mediaType, showNotInterested }: { userId?: string | null; mediaType: 'movie' | 'tv'; showNotInterested: boolean }) {
   const { data, isLoading, isError } = useQuery<CategoryRecommendationsResponse>({
-    queryKey: ['recommendations', 'categories', mediaType],
-    queryFn: () => fetchCategoryRecommendationsApi(mediaType, FETCH_LIMIT),
+    queryKey: getCategoryRecommendationsOverviewQueryKey(userId, mediaType, CATEGORY_OVERVIEW_FETCH_LIMIT),
+    queryFn: () => fetchCategoryRecommendationsApi(mediaType, CATEGORY_OVERVIEW_FETCH_LIMIT),
     staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+    enabled: !!userId,
   });
 
   if (isLoading) {
@@ -162,12 +167,12 @@ function PersonalizedCategoriesContent({ mediaType, showNotInterested }: { media
 
   return (
     <div className="space-y-12">
-      {mediaType === 'movie' && <PersonalizedTheatricalReleasesRow showNotInterested={showNotInterested} />}
+      {mediaType === 'movie' && <PersonalizedTheatricalReleasesRow userId={userId} showNotInterested={showNotInterested} />}
       {data.categories.map((category) => (
         <GenreRow
           key={`personalized-${mediaType}-${category.genre.id}`}
           genre={category.genre}
-          movies={category.results}
+          movies={selectCategoryPreviewRecommendations(category.results, DISPLAY_LIMIT)}
           mediaType={mediaType}
           isLoading={false}
           limit={DISPLAY_LIMIT}
@@ -254,17 +259,18 @@ function TheatricalReleasesRow({ showNotInterested = false }: { showNotIntereste
   );
 }
 
-function PersonalizedTheatricalReleasesRow({ showNotInterested = true }: { showNotInterested?: boolean }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['recommendations', 'theatrical', 'preview'],
-    queryFn: () => fetchTheatricalRecommendationsApi(10, 1),
-    staleTime: 1000 * 60 * 10, // 10 minutes
+function PersonalizedTheatricalReleasesRow({ userId, showNotInterested = true }: { userId?: string | null; showNotInterested?: boolean }) {
+  const { data, isLoading } = useInfiniteQuery({
+    ...getSharedPersonalizedTheatricalInfiniteQueryOptions(userId),
+    enabled: !!userId,
   });
+
+  const previewMovies = selectCategoryPreviewRecommendations(data?.pages[0]?.results ?? []);
 
   return (
     <GenreRow
       title="Theatrical Releases"
-      movies={data?.results || []}
+      movies={previewMovies}
       mediaType="movie"
       isLoading={isLoading}
       limit={10}
