@@ -1,13 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navbar } from '@/components/Navbar';
-import { fetchAdminUsersApi } from '@/lib/api';
-import { AdminUser, AdminUsersResponse } from '@/lib/types';
+import { fetchAdminUsersApi, fetchUserPreferencesApi, updateUserPreferencesApi } from '@/lib/api';
+import { AdminUser, AdminUsersResponse, UserPreferences } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/hooks/useAuth';
+import { getPreferencesQueryKey } from '@/lib/recommendationQueries';
+import { toast } from 'sonner';
 
 const ADMIN_USERS_QUERY_KEY = ['admin', 'users'];
 
@@ -31,9 +34,84 @@ const getInitials = (user: AdminUser) => {
 };
 
 const Admin = () => {
+  const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+  const preferencesQueryKey = getPreferencesQueryKey(currentUser?.id);
+
   const { data, isLoading, isError, error } = useQuery<AdminUsersResponse, Error>({
     queryKey: ADMIN_USERS_QUERY_KEY,
     queryFn: fetchAdminUsersApi,
+  });
+
+  const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
+    queryKey: preferencesQueryKey,
+    queryFn: fetchUserPreferencesApi,
+    enabled: currentUser?.role === 'admin',
+  });
+
+  const updateRedditLabelMutation = useMutation<
+    { preferences: UserPreferences },
+    Error,
+    boolean,
+    {
+      previousAdminUsers?: AdminUsersResponse;
+      previousPreferences?: { preferences: UserPreferences };
+    }
+  >({
+    mutationFn: (enabled: boolean) => updateUserPreferencesApi({ show_reddit_label: enabled }),
+    onMutate: async (enabled: boolean) => {
+      if (!currentUser?.id) {
+        return {};
+      }
+
+      await queryClient.cancelQueries({ queryKey: ADMIN_USERS_QUERY_KEY });
+      await queryClient.cancelQueries({ queryKey: preferencesQueryKey });
+
+      const previousAdminUsers = queryClient.getQueryData<AdminUsersResponse>(ADMIN_USERS_QUERY_KEY);
+      const previousPreferences = queryClient.getQueryData<{ preferences: UserPreferences }>(preferencesQueryKey);
+
+      queryClient.setQueryData<{ preferences: UserPreferences }>(preferencesQueryKey, (old) => {
+        const base = old?.preferences;
+        return {
+          preferences: {
+            recommendations_enabled: base?.recommendations_enabled ?? false,
+            recommendations_collection_id: base?.recommendations_collection_id ?? null,
+            recommendations_collection_ids: base?.recommendations_collection_ids,
+            category_recommendations_enabled: base?.category_recommendations_enabled ?? false,
+            show_adult_items: base?.show_adult_items ?? false,
+            show_reddit_label: enabled,
+          },
+        };
+      });
+
+      queryClient.setQueryData<AdminUsersResponse>(ADMIN_USERS_QUERY_KEY, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          users: old.users.map((adminUser) =>
+            adminUser.id === currentUser.id
+              ? { ...adminUser, showRedditLabel: enabled }
+              : adminUser
+          ),
+        };
+      });
+
+      return { previousAdminUsers, previousPreferences };
+    },
+    onError: (_error, _enabled, context) => {
+      if (context?.previousAdminUsers) {
+        queryClient.setQueryData(ADMIN_USERS_QUERY_KEY, context.previousAdminUsers);
+      }
+      if (context?.previousPreferences) {
+        queryClient.setQueryData(preferencesQueryKey, context.previousPreferences);
+      }
+      toast.error('Failed to update Reddit label preference.');
+    },
+    onSuccess: (response) => {
+      queryClient.setQueryData(preferencesQueryKey, response);
+      const isEnabled = response.preferences.show_reddit_label;
+      toast.success(isEnabled ? 'Reddit label enabled for your account.' : 'Reddit label hidden for your account.');
+    },
   });
 
   return (
@@ -60,6 +138,7 @@ const Admin = () => {
                     <TableHead className="px-4">Provider</TableHead>
                     <TableHead className="px-4">Recommendations</TableHead>
                     <TableHead className="px-4">Category Recs</TableHead>
+                    <TableHead className="px-4">Reddit Label</TableHead>
                     <TableHead className="px-4">Collections</TableHead>
                     <TableHead className="px-4">Joined</TableHead>
                   </TableRow>
@@ -72,6 +151,7 @@ const Admin = () => {
                       <TableCell className="px-4"><Skeleton className="h-4 w-52" /></TableCell>
                       <TableCell className="px-4"><Skeleton className="h-5 w-14 rounded-full" /></TableCell>
                       <TableCell className="px-4"><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+                      <TableCell className="px-4"><Skeleton className="h-5 w-9 rounded-full" /></TableCell>
                       <TableCell className="px-4"><Skeleton className="h-5 w-9 rounded-full" /></TableCell>
                       <TableCell className="px-4"><Skeleton className="h-5 w-9 rounded-full" /></TableCell>
                       <TableCell className="px-4"><Skeleton className="h-4 w-8" /></TableCell>
@@ -106,6 +186,7 @@ const Admin = () => {
                     <TableHead className="px-4">Provider</TableHead>
                     <TableHead className="px-4">Recommendations</TableHead>
                     <TableHead className="px-4">Category Recs</TableHead>
+                    <TableHead className="px-4">Reddit Label</TableHead>
                     <TableHead className="px-4">Collections</TableHead>
                     <TableHead className="px-4">Joined</TableHead>
                   </TableRow>
@@ -114,6 +195,12 @@ const Admin = () => {
                   {data?.users.map((user) => {
                     const avatarSrc = user.avatarUrl || user.image || undefined;
                     const role = user.role || 'user';
+                    const isOwnAdminRow = currentUser?.id === user.id && role === 'admin';
+                    const redditLabelChecked = role !== 'admin'
+                      ? false
+                      : isOwnAdminRow
+                        ? (preferencesData?.preferences?.show_reddit_label ?? user.showRedditLabel ?? true)
+                        : Boolean(user.showRedditLabel ?? true);
 
                     return (
                       <TableRow key={user.id}>
@@ -156,6 +243,16 @@ const Admin = () => {
                         </TableCell>
                         <TableCell className="px-4">
                           <Switch checked={Boolean(user.categoryRecommendationsEnabled)} disabled />
+                        </TableCell>
+                        <TableCell className="px-4">
+                          <Switch
+                            checked={redditLabelChecked}
+                            disabled={!isOwnAdminRow || updateRedditLabelMutation.isPending}
+                            onCheckedChange={(checked) => {
+                              if (!isOwnAdminRow) return;
+                              updateRedditLabelMutation.mutate(checked);
+                            }}
+                          />
                         </TableCell>
                         <TableCell className="px-4">{user.collectionCount}</TableCell>
                         <TableCell className="px-4">{formatDate(user.createdAt)}</TableCell>

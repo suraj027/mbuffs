@@ -18,6 +18,7 @@ interface AdminUserRow {
     recommendations_enabled: boolean | null;
     recommendations_collection_id: string | null;
     category_recommendations_enabled: boolean | null;
+    show_reddit_label: boolean | null;
 }
 
 interface CollectionCountRow {
@@ -41,7 +42,7 @@ const toIsoString = (value: string | Date): string => {
 export const getAllUsers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
         const usersResult = await sql`
-            SELECT id, name, email, email_verified, image, username, avatar_url, first_name, last_name, role, created_at, updated_at, recommendations_enabled, recommendations_collection_id, category_recommendations_enabled
+            SELECT id, name, email, email_verified, image, username, avatar_url, first_name, last_name, role, created_at, updated_at, recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_reddit_label
             FROM "user"
             ORDER BY created_at DESC
         `;
@@ -92,6 +93,7 @@ export const getAllUsers = async (req: Request, res: Response, next: NextFunctio
             recommendationsEnabled: userRow.recommendations_enabled ?? false,
             recommendationsCollectionId: userRow.recommendations_collection_id ?? null,
             categoryRecommendationsEnabled: userRow.category_recommendations_enabled ?? false,
+            showRedditLabel: userRow.show_reddit_label ?? true,
             providers: providersByUserId.get(userRow.id) ?? [],
             collectionCount: collectionCountByOwnerId.get(userRow.id) ?? 0,
         }));

@@ -1,10 +1,10 @@
-import { Movie } from "@/lib/types";
-import { getImageUrl, toggleNotInterestedStatusApi, toggleWatchedStatusApi } from "@/lib/api";
+import { Movie, UserPreferences } from "@/lib/types";
+import { fetchUserPreferencesApi, getImageUrl, toggleNotInterestedStatusApi, toggleWatchedStatusApi } from "@/lib/api";
 import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { getForYouRecommendationsQueryKey } from "@/lib/recommendationQueries";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getForYouRecommendationsQueryKey, getPreferencesQueryKey } from "@/lib/recommendationQueries";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,13 @@ export function MovieCard({
   const shouldShowBecauseYouLiked = meetsExplainabilityCondition && randomBucket === 0;
   
   const { isLoggedIn, user } = useAuth();
+  const preferencesQueryKey = getPreferencesQueryKey(user?.id);
+  const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
+    queryKey: preferencesQueryKey,
+    queryFn: fetchUserPreferencesApi,
+    enabled: isLoggedIn && user?.role === 'admin',
+    staleTime: 1000 * 60 * 5,
+  });
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
@@ -165,8 +172,8 @@ export function MovieCard({
           {/* Gradient overlay — always visible at bottom, intensifies on hover */}
           <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-100 transition-opacity duration-300" />
 
-          {/* Reddit Badge (admin-only) */}
-          {isRedditRecommended && user?.role === 'admin' && (
+          {/* Reddit Badge (admin-toggleable) */}
+          {isRedditRecommended && user?.role === 'admin' && (preferencesData?.preferences?.show_reddit_label ?? true) && (
             <div className="absolute top-2 left-2 z-20">
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-orange-500/90 text-[10px] font-semibold text-white shadow-sm">
                 <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="currentColor">

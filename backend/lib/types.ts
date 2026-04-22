@@ -9,6 +9,7 @@ export interface DatabaseUserAttributes {
     updated_at: Date;
     recommendations_enabled: boolean;
     recommendations_collection_id: string | null;
+    show_reddit_label: boolean;
 }
 
 export interface AdminUserResponse {
@@ -28,6 +29,7 @@ export interface AdminUserResponse {
     recommendationsEnabled: boolean;
     recommendationsCollectionId: string | null;
     categoryRecommendationsEnabled: boolean;
+    showRedditLabel: boolean;
     collectionCount: number;
 }
 
@@ -40,6 +42,7 @@ export interface UserPreferences {
     // Category recommendations toggle
     category_recommendations_enabled: boolean;
     show_adult_items: boolean;
+    show_reddit_label: boolean;
 }
 
 export interface UpdateUserPreferencesInput {
@@ -47,6 +50,7 @@ export interface UpdateUserPreferencesInput {
     recommendations_collection_id?: string | null;
     category_recommendations_enabled?: boolean;
     show_adult_items?: boolean;
+    show_reddit_label?: boolean;
 }
 
 // --- Recommendation Types ---

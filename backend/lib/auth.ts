@@ -110,6 +110,12 @@ export const auth = betterAuth({
                 required: false,
                 fieldName: "recommendationsCollectionId",
             },
+            showRedditLabel: {
+                type: "boolean",
+                required: false,
+                defaultValue: true,
+                fieldName: "showRedditLabel",
+            },
         },
     },
     account: {

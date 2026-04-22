@@ -26,7 +26,8 @@ const getCurrentUser: RequestHandler = async (req: Request, res: Response, next:
                    first_name as "firstName",
                    last_name as "lastName",
                    recommendations_enabled as "recommendationsEnabled",
-                   recommendations_collection_id as "recommendationsCollectionId"
+                   recommendations_collection_id as "recommendationsCollectionId",
+                   show_reddit_label as "showRedditLabel"
             FROM "user"
             WHERE id = ${req.userId}
         `;

@@ -27,6 +27,7 @@ export const useAuth = () => {
         createdAt: session.user.createdAt,
         recommendationsEnabled: (session.user as { recommendationsEnabled?: boolean }).recommendationsEnabled,
         recommendationsCollectionId: (session.user as { recommendationsCollectionId?: string }).recommendationsCollectionId,
+        showRedditLabel: (session.user as { showRedditLabel?: boolean }).showRedditLabel,
         role: (session.user as { role?: string }).role,
     } : null;
 

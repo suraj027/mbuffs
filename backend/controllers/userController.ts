@@ -15,7 +15,7 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
 
     try {
         const result = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
             FROM "user"
             WHERE id = ${req.userId}
         `;
@@ -30,6 +30,7 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
             recommendations_collection_id: user.recommendations_collection_id ?? null,
             category_recommendations_enabled: user.category_recommendations_enabled ?? false,
             show_adult_items: user.show_adult_items ?? false,
+            show_reddit_label: user.show_reddit_label ?? true,
         };
 
         res.status(200).json({ preferences });
@@ -44,7 +45,13 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items } = req.body as UpdateUserPreferencesInput;
+    const {
+        recommendations_enabled,
+        recommendations_collection_id,
+        category_recommendations_enabled,
+        show_adult_items,
+        show_reddit_label,
+    } = req.body as UpdateUserPreferencesInput;
 
     try {
         // If a collection ID is provided, verify the user owns it or has access
@@ -69,14 +76,15 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const hasCollectionId = recommendations_collection_id !== undefined;
         const hasCategoryRecommendations = category_recommendations_enabled !== undefined;
         const hasShowAdultItems = show_adult_items !== undefined;
+        const hasShowRedditLabel = show_reddit_label !== undefined;
 
-        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations && !hasShowAdultItems) {
+        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations && !hasShowAdultItems && !hasShowRedditLabel) {
             return res.status(400).json({ message: "No valid fields to update" });
         }
 
         // Get current values first
         const currentResult = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
             FROM "user"
             WHERE id = ${req.userId}
         `;
@@ -92,6 +100,7 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const newCollectionId = hasCollectionId ? recommendations_collection_id : current.recommendations_collection_id;
         const newCategoryRecommendations = hasCategoryRecommendations ? category_recommendations_enabled : current.category_recommendations_enabled;
         const newShowAdultItems = hasShowAdultItems ? show_adult_items : current.show_adult_items;
+        const newShowRedditLabel = hasShowRedditLabel ? show_reddit_label : current.show_reddit_label;
 
         // Update all fields
         const result = await sql`
@@ -100,9 +109,10 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
                 recommendations_collection_id = ${newCollectionId},
                 category_recommendations_enabled = ${newCategoryRecommendations},
                 show_adult_items = ${newShowAdultItems},
+                show_reddit_label = ${newShowRedditLabel},
                 updated_at = NOW()
             WHERE id = ${req.userId}
-            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items
+            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
         `;
 
         if (result.length === 0) {
@@ -111,13 +121,23 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
 
         const updatedUser = result[0];
 
-        await invalidateRecommendationCache(req.userId);
+        const shouldInvalidateRecommendationCache = (
+            newRecommendationsEnabled !== current.recommendations_enabled ||
+            newCollectionId !== current.recommendations_collection_id ||
+            newCategoryRecommendations !== current.category_recommendations_enabled ||
+            newShowAdultItems !== current.show_adult_items
+        );
+
+        if (shouldInvalidateRecommendationCache) {
+            await invalidateRecommendationCache(req.userId);
+        }
 
         const preferences: UserPreferences = {
             recommendations_enabled: updatedUser.recommendations_enabled ?? false,
             recommendations_collection_id: updatedUser.recommendations_collection_id ?? null,
             category_recommendations_enabled: updatedUser.category_recommendations_enabled ?? false,
             show_adult_items: updatedUser.show_adult_items ?? true,
+            show_reddit_label: updatedUser.show_reddit_label ?? true,
         };
 
         res.status(200).json({ preferences });

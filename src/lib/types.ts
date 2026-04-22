@@ -249,6 +249,7 @@ export interface User {
   // Custom fields
   recommendationsEnabled?: boolean;
   recommendationsCollectionId?: string | null;
+  showRedditLabel?: boolean;
   role?: string;
 }
 
@@ -258,6 +259,7 @@ export interface AdminUser extends User {
   role: string;
   providers: string[];
   categoryRecommendationsEnabled?: boolean;
+  showRedditLabel?: boolean;
   collectionCount: number;
 }
 
@@ -275,6 +277,7 @@ export interface UserPreferences {
   // Category recommendations toggle
   category_recommendations_enabled: boolean;
   show_adult_items: boolean;
+  show_reddit_label: boolean;
 }
 
 export interface UpdateUserPreferencesInput {
@@ -282,6 +285,7 @@ export interface UpdateUserPreferencesInput {
   recommendations_collection_id?: string | null;
   category_recommendations_enabled?: boolean;
   show_adult_items?: boolean;
+  show_reddit_label?: boolean;
 }
 
 // --- Recommendation Types ---
