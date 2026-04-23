@@ -173,12 +173,12 @@ export function MovieCard({
         onClick={onClick}
       >
         {/* Poster Image */}
-        <div className="aspect-2/3 relative overflow-hidden">
+        <div className="aspect-2/3 relative overflow-hidden bg-muted">
           <img
             src={getImageUrl(movie.poster_path)}
             alt={movie.name || movie.title}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-            loading="lazy"
+            decoding="async"
           />
           
           {/* Gradient overlay — always visible at bottom, intensifies on hover */}
