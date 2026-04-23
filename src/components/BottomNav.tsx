@@ -1,6 +1,9 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, LayoutGrid, Search, Sparkles, User, type LucideIcon } from 'lucide-react';
+import { Home, LayoutGrid, Search, List, User, type LucideIcon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { haptics } from '@/lib/haptics';
+import { useAuth } from '@/hooks/useAuth';
+import { fetchCurrentUserApi } from '@/lib/api';
 
 const HIDDEN_PATHS = ['/login'];
 
@@ -16,12 +19,19 @@ const tabs: Tab[] = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/categories', label: 'Categories', icon: LayoutGrid },
   { to: 'search', label: 'Search', icon: Search, action: 'search' },
-  { to: '/for-you', label: 'For You', icon: Sparkles },
+  { to: '/collections', label: 'Collections', icon: List },
   { to: '/profile', label: 'Profile', icon: User },
 ];
 
 export const BottomNav = () => {
   const location = useLocation();
+  const { user } = useAuth();
+  const { data: meData } = useQuery({
+    queryKey: ['user', 'me'],
+    queryFn: fetchCurrentUserApi,
+    enabled: !!user,
+  });
+  const avatarUrl = meData?.user?.avatarUrl || meData?.user?.image || user?.avatarUrl || user?.image || undefined;
 
   if (HIDDEN_PATHS.some((path) => location.pathname.startsWith(path))) {
     return null;
@@ -78,7 +88,16 @@ export const BottomNav = () => {
               >
                 {({ isActive }) => (
                   <>
-                    <Icon className="h-5 w-5" strokeWidth={isActive ? 2.25 : 2} />
+                    {tab.to === '/profile' && avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className={`h-5 w-5 rounded-full object-cover ${isActive ? 'ring-2 ring-foreground' : ''}`}
+                      />
+                    ) : (
+                      <Icon className="h-5 w-5" strokeWidth={isActive ? 2.25 : 2} />
+                    )}
                     <span className="text-[10px] font-medium">{tab.label}</span>
                   </>
                 )}
