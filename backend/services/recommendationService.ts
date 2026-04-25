@@ -204,7 +204,14 @@ interface CategoryRecommendationsResult {
     totalSourceItems: number;
 }
 
-type RecommendationCacheEndpoint = 'for_you' | 'categories' | 'genre' | 'theatrical' | 'exclusions';
+interface RecommendationPool {
+    candidates: RecommendationCandidate[];
+    sourceCollections: { id: string; name: string }[];
+    totalSourceItems: number;
+    genreScores: Record<number, number>;
+}
+
+type RecommendationCacheEndpoint = 'for_you' | 'for_you_pool' | 'categories' | 'genre' | 'theatrical' | 'exclusions';
 
 interface RecommendationCacheDebugEntry {
     cache_key: string;
@@ -215,7 +222,7 @@ interface RecommendationCacheDebugEntry {
     payload_size: number;
 }
 
-const RECOMMENDATION_CACHE_VERSION = 'v6';
+const RECOMMENDATION_CACHE_VERSION = 'v7';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const RECOMMENDATION_CACHE_EXPIRED_RETENTION_MINUTES = 60 * 24;
 const RECOMMENDATION_CACHE_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
@@ -227,8 +234,6 @@ let recommendationCacheCleanupPromise: Promise<void> | null = null;
 const REDDIT_BOOST_ENABLED = true;
 const REDDIT_BOOST_MULTIPLIER = 30; // Points per mention
 const REDDIT_POSITIVE_SENTIMENT_BONUS = 20;
-const CATEGORY_FOR_YOU_POOL_MIN = 240;
-const CATEGORY_FOR_YOU_POOL_MAX = 500;
 const MIN_THEATRICAL_TMDB_PAGES_TO_FETCH = 3;
 const MAX_THEATRICAL_TMDB_PAGES_TO_FETCH = 12;
 
@@ -1299,10 +1304,7 @@ export async function expireRecommendationCacheByCollection(collectionId: string
 
 export function warmPersonalizedRecommendationCache(userId: string): void {
     void Promise.allSettled([
-        generateRecommendationsCached(userId, 60, 1),
-        generateRecommendationsCached(userId, 60, 2),
-        generateCategoryRecommendationsCached(userId, 'movie', 50),
-        generateCategoryRecommendationsCached(userId, 'tv', 50),
+        getOrGenerateRecommendationPoolCached(userId),
         generatePersonalizedTheatricalReleasesCached(userId, 60, 1),
         generatePersonalizedTheatricalReleasesCached(userId, 60, 2),
     ]).catch((error) => {
@@ -1959,7 +1961,7 @@ async function generateColdStartRecommendations(
 }
 
 /**
- * Main recommendation algorithm
+ * Build the shared, fully-ranked recommendation pool for For You and Categories
  * 
  * Strategy:
  * 1. Retrieve candidates from TMDB graph edges (recommendations/similar) and creator affinity expansions
@@ -1967,20 +1969,16 @@ async function generateColdStartRecommendations(
  * 3. Rank with a multi-objective scorer (CTR proxy, CVR proxy, long-term engagement)
  * 4. Re-rank with diversity/novelty/freshness/business constraints
  * 5. Apply contextual-bandit exploration to avoid local optima
- * 6. Filter out items already in user's collections and return paginated results
+ * 6. Filter out items already in user's collections and return the full ranked pool
  */
-export async function generateRecommendations(
-    userId: string,
-    limit: number = 60,
-    page: number = 1
-): Promise<RecommendationResult> {
-    const emptyResult: RecommendationResult = { 
-        results: [], 
-        sourceCollections: [], 
+async function generateRecommendationPool(
+    userId: string
+): Promise<RecommendationPool> {
+    const emptyPool: RecommendationPool = {
+        candidates: [],
+        sourceCollections: [],
         totalSourceItems: 0,
-        page: 1,
-        total_pages: 0,
-        total_results: 0
+        genreScores: {}
     };
 
     // Check if user has recommendations enabled
@@ -1989,7 +1987,7 @@ export async function generateRecommendations(
     `;
     
     if (userResult.length === 0 || !userResult[0].recommendations_enabled) {
-        return emptyResult;
+        return emptyPool;
     }
     
     const engagementSignals = await getUserEngagementSignals(userId);
@@ -2012,7 +2010,13 @@ export async function generateRecommendations(
                 sourceCollections = [{ id: WATCHED_COLLECTION_NAME, name: 'Watched history' }];
             }
         } else {
-            return generateColdStartRecommendations(userId, limit, page, sourceCollections);
+            const coldStartRecommendations = await generateColdStartRecommendations(userId, 500, 1, sourceCollections);
+            return {
+                candidates: coldStartRecommendations.results.map((item) => ({ item, score: 0, sources: 0 })),
+                sourceCollections: coldStartRecommendations.sourceCollections,
+                totalSourceItems: coldStartRecommendations.totalSourceItems,
+                genreScores: {}
+            };
         }
     }
     
@@ -2034,12 +2038,12 @@ export async function generateRecommendations(
     const actorScores: Map<number, ActorInfo> = new Map();
     const allRecommendations: Map<string, RecommendationCandidate> = new Map();
     
-    // Sample a subset of source movies to avoid rate limiting (max 10 for API calls)
-    const sampleSize = Math.min(sourceMovies.length, 10);
+    // Sample a subset of source movies to avoid rate limiting (max 20 for API calls)
+    const sampleSize = Math.min(sourceMovies.length, 20);
     const sampledMovies = deterministicSample(
         sourceMovies,
         sampleSize,
-        `${userId}:for-you:${page}:${limit}:${recommendationProfileToken}`,
+        `${userId}:for-you-pool:${recommendationProfileToken}`,
         (movie) => movie.movie_id
     );
     
@@ -2543,28 +2547,78 @@ export async function generateRecommendations(
     const finalCandidates = applyContextualBanditPolicy(
         rerankedCandidates,
         engagementSignals,
-        page,
-        limit,
-        `${userId}:for-you:${page}:${limit}:${recommendationProfileToken}`
+        1,
+        rerankedCandidates.length,
+        `${userId}:for-you-pool:${recommendationProfileToken}`
     );
 
     const shuffledCandidates = applyProfileJitter(
         finalCandidates,
-        `${userId}:for-you:${recommendationProfileToken}`,
+        `${userId}:for-you-pool:${recommendationProfileToken}`,
         4
     );
 
-    const totalResults = shuffledCandidates.length;
-    const totalPages = Math.ceil(totalResults / limit);
-    const paginatedResults = paginateOrderedCandidates(shuffledCandidates, page, limit).map((result) => result.item);
-    
     return {
-        results: paginatedResults,
+        candidates: shuffledCandidates,
         sourceCollections,
         totalSourceItems: sourceMovies.length,
+        genreScores: Object.fromEntries(genreScores)
+    };
+}
+
+async function getOrGenerateRecommendationPoolCached(userId: string): Promise<RecommendationPool> {
+    return withRecommendationContext(userId, () =>
+        getCachedRecommendationResult<RecommendationPool>(
+            userId,
+            'for_you_pool',
+            {},
+            () => generateRecommendationPool(userId)
+        )
+    );
+}
+
+export async function generateRecommendations(
+    userId: string,
+    limit: number = 60,
+    page: number = 1
+): Promise<RecommendationResult> {
+    const emptyResult: RecommendationResult = {
+        results: [],
+        sourceCollections: [],
+        totalSourceItems: 0,
+        page: 1,
+        total_pages: 0,
+        total_results: 0
+    };
+
+    const userResult = await sql`
+        SELECT recommendations_enabled FROM "user" WHERE id = ${userId}
+    `;
+
+    if (userResult.length === 0 || !userResult[0].recommendations_enabled) {
+        return emptyResult;
+    }
+
+    const pool = await getOrGenerateRecommendationPoolCached(userId);
+    if (pool.candidates.length === 0) {
+        return {
+            ...emptyResult,
+            sourceCollections: pool.sourceCollections,
+            totalSourceItems: pool.totalSourceItems
+        };
+    }
+
+    const totalResults = pool.candidates.length;
+    const totalPages = Math.ceil(totalResults / limit);
+    const paginatedResults = paginateOrderedCandidates(pool.candidates, page, limit).map((result) => result.item);
+
+    return {
+        results: paginatedResults,
+        sourceCollections: pool.sourceCollections,
+        totalSourceItems: pool.totalSourceItems,
         page,
         total_pages: totalPages,
-        total_results: totalResults
+        total_results: totalResults,
     };
 }
 
@@ -2611,16 +2665,13 @@ export async function generateCategoryRecommendations(
     }
 
     const normalizedLimit = Math.max(1, limit);
-    const forYouPoolLimit = Math.min(
-        Math.max(normalizedLimit * 8, CATEGORY_FOR_YOU_POOL_MIN),
-        CATEGORY_FOR_YOU_POOL_MAX
-    );
+    const pool = await getOrGenerateRecommendationPoolCached(userId);
+    const sourceCollections = pool.sourceCollections;
+    const totalSourceItems = pool.totalSourceItems;
 
-    const forYouRecommendations = await generateRecommendations(userId, forYouPoolLimit, 1);
-    const sourceCollections = forYouRecommendations.sourceCollections;
-    const totalSourceItems = forYouRecommendations.totalSourceItems;
-
-    const rankedItems = forYouRecommendations.results.filter((item) => getItemMediaType(item) === mediaType);
+    const rankedItems = pool.candidates
+        .map((candidate) => candidate.item)
+        .filter((item) => getItemMediaType(item) === mediaType);
 
     if (rankedItems.length === 0) {
         return {
@@ -2633,50 +2684,14 @@ export async function generateCategoryRecommendations(
     const genreNameMap = await getGenreNameMap(mediaType);
     const sourceGenreScores: Map<number, { id: number; name: string; count: number }> = new Map();
 
-    // Preserve the user's source-genre priority when possible, but do not build a
-    // separate recommendation pool here. The actual titles below all come from
-    // the For You algorithm above.
-    let sourceMovies: CollectionMovie[] = [];
-    const explicitSourceCollections = await getUserRecommendationCollections(userId);
-    if (explicitSourceCollections.length > 0) {
-        sourceMovies = await getMoviesFromRecommendationCollections(userId);
-    } else {
-        sourceMovies = await getWatchedSeedMovies(userId, 15);
+    for (const [genreIdStr, count] of Object.entries(pool.genreScores)) {
+        const id = Number(genreIdStr);
+        sourceGenreScores.set(id, {
+            id,
+            name: genreNameMap.get(id) || `Genre ${id}`,
+            count,
+        });
     }
-
-    const sourceItemsOfType = sourceMovies.filter((movie) => {
-        const { isMovie } = parseMovieId(movie.movie_id);
-        return isMovie === (mediaType === 'movie');
-    });
-
-    const sampledSourceItems = deterministicSample(
-        sourceItemsOfType,
-        Math.min(sourceItemsOfType.length, 15),
-        `${userId}:category-genre-profile:${mediaType}:${sourceItemsOfType.length}`,
-        (item) => item.movie_id
-    );
-
-    await Promise.all(sampledSourceItems.map(async (movie) => {
-        const { id, isMovie } = parseMovieId(movie.movie_id);
-        const details = await getItemDetails(id, isMovie);
-
-        if (!details?.genres) {
-            return;
-        }
-
-        for (const genre of details.genres) {
-            const existing = sourceGenreScores.get(genre.id);
-            if (existing) {
-                existing.count += 1;
-            } else {
-                sourceGenreScores.set(genre.id, {
-                    id: genre.id,
-                    name: genre.name || genreNameMap.get(genre.id) || `Genre ${genre.id}`,
-                    count: 1
-                });
-            }
-        }
-    }));
 
     // Add any genres that appear in the For You-ranked pool so sparse profiles,
     // watched-history fallback, and cold-start users can still get category rows.
@@ -3484,22 +3499,7 @@ export async function generateRecommendationsCached(
     limit: number = 60,
     page: number = 1
 ): Promise<RecommendationResult> {
-    const result = await withRecommendationContext(userId, () =>
-        getCachedRecommendationResult(
-            userId,
-            'for_you',
-            { limit, page },
-            () => generateRecommendations(userId, limit, page)
-        )
-    );
-
-    if (page === 1 && result.page < result.total_pages) {
-        void generateRecommendationsCached(userId, limit, 2).catch((error) => {
-            console.error("Error warming next For You recommendation page:", error);
-        });
-    }
-
-    return result;
+    return generateRecommendations(userId, limit, page);
 }
 
 export async function generateCategoryRecommendationsCached(
