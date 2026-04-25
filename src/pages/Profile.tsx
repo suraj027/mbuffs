@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/hooks/useAuth';
-import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2, ShieldAlert } from 'lucide-react';
+import { Mail, Calendar, Sparkles, FolderHeart, X, ChevronDown, Grid3X3, Eye, ThumbsDown, ArrowRight, Database, Camera, Loader2, Trash2, ShieldAlert, LogOut } from 'lucide-react';
 import { toast } from "sonner";
 import { Link } from 'react-router-dom';
 import {
@@ -74,7 +74,7 @@ const NOT_INTERESTED_ITEMS_QUERY_KEY = ['collections', 'not-interested', 'items'
 
 const Profile = () => {
     const queryClient = useQueryClient();
-    const { user, isLoadingUser } = useAuth();
+    const { user, isLoadingUser, logout, isLoggingOut } = useAuth();
     const preferencesQueryKey = getPreferencesQueryKey(user?.id);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -335,6 +335,15 @@ const Profile = () => {
         }
     };
 
+    const handleLogout = async () => {
+        try {
+            await logout();
+            toast.success('Logged out successfully.');
+        } catch {
+            toast.error('Failed to log out.');
+        }
+    };
+
     const handleRemoveAvatar = async () => {
         setIsUploadingAvatar(true);
         try {
@@ -463,6 +472,23 @@ const Profile = () => {
                         </div>
                     </CardContent>
                 </Card>
+
+                {/* Mobile-only logout button (desktop uses navbar dropdown) */}
+                <div className="mb-6 md:hidden">
+                    <Button
+                        variant="outline"
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="w-full h-11 justify-center text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                        {isLoggingOut ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <LogOut className="mr-2 h-4 w-4" />
+                        )}
+                        <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
+                    </Button>
+                </div>
 
                 {/* Recommendations Settings Card */}
                 <Card>

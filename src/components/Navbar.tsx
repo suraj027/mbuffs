@@ -271,7 +271,7 @@ export const Navbar = () => {
             {isLoggedIn && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full hover:bg-transparent">
+                  <Button variant="ghost" size="icon" className="hidden md:inline-flex rounded-full hover:bg-transparent">
                     {navAvatarUrl ? (
                       <img src={navAvatarUrl} alt={user.username || 'User Avatar'} className="h-8 w-8 rounded-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
