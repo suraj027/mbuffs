@@ -217,7 +217,11 @@ interface RecommendationCacheDebugEntry {
 
 const RECOMMENDATION_CACHE_VERSION = 'v5';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
+const RECOMMENDATION_CACHE_EXPIRED_RETENTION_MINUTES = 60 * 24;
+const RECOMMENDATION_CACHE_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
 const recommendationCacheLocks = new Map<string, Promise<void>>();
+let lastRecommendationCacheCleanupAt = 0;
+let recommendationCacheCleanupPromise: Promise<void> | null = null;
 
 // Reddit boost configuration
 const REDDIT_BOOST_ENABLED = true;
@@ -1091,12 +1095,101 @@ async function withRecommendationCacheLock<T>(lockKey: string, fn: () => Promise
     }
 }
 
+function cleanupRecommendationCacheInBackground(): void {
+    const now = Date.now();
+    if (
+        recommendationCacheCleanupPromise ||
+        now - lastRecommendationCacheCleanupAt < RECOMMENDATION_CACHE_CLEANUP_INTERVAL_MS
+    ) {
+        return;
+    }
+
+    lastRecommendationCacheCleanupAt = now;
+    recommendationCacheCleanupPromise = sql`
+        DELETE FROM recommendation_cache
+        WHERE cache_version <> ${RECOMMENDATION_CACHE_VERSION}
+           OR expires_at < NOW() - (${RECOMMENDATION_CACHE_EXPIRED_RETENTION_MINUTES} * INTERVAL '1 minute')
+    `.then(() => undefined)
+        .catch((error) => {
+            console.error("Error cleaning recommendation cache:", error);
+        })
+        .finally(() => {
+            recommendationCacheCleanupPromise = null;
+        });
+}
+
+async function writeCachedRecommendationResult<T>(
+    userId: string,
+    cacheKey: string,
+    result: T
+): Promise<void> {
+    cleanupRecommendationCacheInBackground();
+
+    await sql`
+        INSERT INTO recommendation_cache (
+            id,
+            user_id,
+            cache_key,
+            payload_json,
+            cache_version,
+            expires_at,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            gen_random_uuid()::text,
+            ${userId},
+            ${cacheKey},
+            ${JSON.stringify(result)},
+            ${RECOMMENDATION_CACHE_VERSION},
+            NOW() + (${RECOMMENDATION_CACHE_TTL_MINUTES} * INTERVAL '1 minute'),
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (user_id, cache_key)
+        DO UPDATE SET
+            payload_json = EXCLUDED.payload_json,
+            cache_version = EXCLUDED.cache_version,
+            expires_at = EXCLUDED.expires_at,
+            updated_at = NOW()
+    `;
+}
+
+function refreshRecommendationCacheInBackground<T>(
+    userId: string,
+    cacheKey: string,
+    generator: () => Promise<T>
+): void {
+    const lockKey = `${userId}:${cacheKey}`;
+
+    void withRecommendationCacheLock(lockKey, async () => {
+        const recheckRows = await sql`
+            SELECT expires_at
+            FROM recommendation_cache
+            WHERE user_id = ${userId} AND cache_key = ${cacheKey}
+            LIMIT 1
+        `;
+
+        const recheckRow = recheckRows[0] as { expires_at: string } | undefined;
+        if (recheckRow && new Date(recheckRow.expires_at) > new Date()) {
+            return;
+        }
+
+        const freshResult = await generator();
+        await writeCachedRecommendationResult(userId, cacheKey, freshResult);
+    }).catch((error) => {
+        console.error("Error refreshing recommendation cache in background:", error);
+    });
+}
+
 async function getCachedRecommendationResult<T>(
     userId: string,
     endpoint: RecommendationCacheEndpoint,
     params: Record<string, string | number>,
     generator: () => Promise<T>
 ): Promise<T> {
+    cleanupRecommendationCacheInBackground();
+
     const cacheKey = buildRecommendationCacheKey(endpoint, params);
     const now = new Date();
 
@@ -1112,6 +1205,11 @@ async function getCachedRecommendationResult<T>(
     const isFresh = existingRow ? new Date(existingRow.expires_at) > now : false;
 
     if (cachedPayload && isFresh) {
+        return cachedPayload;
+    }
+
+    if (cachedPayload) {
+        refreshRecommendationCacheInBackground(userId, cacheKey, generator);
         return cachedPayload;
     }
 
@@ -1135,36 +1233,7 @@ async function getCachedRecommendationResult<T>(
 
         try {
             const freshResult = await generator();
-
-            await sql`
-                INSERT INTO recommendation_cache (
-                    id,
-                    user_id,
-                    cache_key,
-                    payload_json,
-                    cache_version,
-                    expires_at,
-                    created_at,
-                    updated_at
-                )
-                VALUES (
-                    gen_random_uuid()::text,
-                    ${userId},
-                    ${cacheKey},
-                    ${JSON.stringify(freshResult)},
-                    ${RECOMMENDATION_CACHE_VERSION},
-                    NOW() + (${RECOMMENDATION_CACHE_TTL_MINUTES} * INTERVAL '1 minute'),
-                    NOW(),
-                    NOW()
-                )
-                ON CONFLICT (user_id, cache_key)
-                DO UPDATE SET
-                    payload_json = EXCLUDED.payload_json,
-                    cache_version = EXCLUDED.cache_version,
-                    expires_at = EXCLUDED.expires_at,
-                    updated_at = NOW()
-            `;
-
+            await writeCachedRecommendationResult(userId, cacheKey, freshResult);
             return freshResult;
         } catch (error) {
             if (recheckPayload) {
@@ -1187,6 +1256,15 @@ export async function invalidateRecommendationCache(userId: string): Promise<voi
     `;
 }
 
+export async function expireRecommendationCache(userId: string): Promise<void> {
+    await sql`
+        UPDATE recommendation_cache
+        SET expires_at = NOW() - INTERVAL '1 second',
+            updated_at = NOW()
+        WHERE user_id = ${userId}
+    `;
+}
+
 export async function invalidateRecommendationCacheByCollection(collectionId: string): Promise<void> {
     await sql`
         DELETE FROM recommendation_cache rc
@@ -1194,6 +1272,30 @@ export async function invalidateRecommendationCacheByCollection(collectionId: st
         WHERE rc.user_id = urc.user_id
         AND urc.collection_id = ${collectionId}
     `;
+}
+
+export async function expireRecommendationCacheByCollection(collectionId: string): Promise<void> {
+    await sql`
+        UPDATE recommendation_cache rc
+        SET expires_at = NOW() - INTERVAL '1 second',
+            updated_at = NOW()
+        FROM user_recommendation_collections urc
+        WHERE rc.user_id = urc.user_id
+        AND urc.collection_id = ${collectionId}
+    `;
+}
+
+export function warmPersonalizedRecommendationCache(userId: string): void {
+    void Promise.allSettled([
+        generateRecommendationsCached(userId, 60, 1),
+        generateRecommendationsCached(userId, 60, 2),
+        generateCategoryRecommendationsCached(userId, 'movie', 50),
+        generateCategoryRecommendationsCached(userId, 'tv', 50),
+        generatePersonalizedTheatricalReleasesCached(userId, 60, 1),
+        generatePersonalizedTheatricalReleasesCached(userId, 60, 2),
+    ]).catch((error) => {
+        console.error("Error warming personalized recommendation cache:", error);
+    });
 }
 
 export async function getRecommendationCacheDebug(userId: string): Promise<{
@@ -2708,6 +2810,7 @@ export async function addRecommendationCollection(
         `;
 
         await invalidateRecommendationCache(userId);
+        warmPersonalizedRecommendationCache(userId);
         
         return true;
     } catch (error) {
@@ -2730,6 +2833,7 @@ export async function removeRecommendationCollection(
         `;
 
         await invalidateRecommendationCache(userId);
+        warmPersonalizedRecommendationCache(userId);
 
         return true;
     } catch (error) {
@@ -3386,6 +3490,7 @@ export async function setRecommendationCollections(
         }
 
         await invalidateRecommendationCache(userId);
+        warmPersonalizedRecommendationCache(userId);
         
         return true;
     } catch (error) {
@@ -3399,7 +3504,7 @@ export async function generateRecommendationsCached(
     limit: number = 60,
     page: number = 1
 ): Promise<RecommendationResult> {
-    return withRecommendationContext(userId, () =>
+    const result = await withRecommendationContext(userId, () =>
         getCachedRecommendationResult(
             userId,
             'for_you',
@@ -3407,6 +3512,14 @@ export async function generateRecommendationsCached(
             () => generateRecommendations(userId, limit, page)
         )
     );
+
+    if (page === 1 && result.page < result.total_pages) {
+        void generateRecommendationsCached(userId, limit, 2).catch((error) => {
+            console.error("Error warming next For You recommendation page:", error);
+        });
+    }
+
+    return result;
 }
 
 export async function generateCategoryRecommendationsCached(

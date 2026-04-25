@@ -8,7 +8,8 @@ import {
     addRecommendationCollection,
     removeRecommendationCollection,
     setRecommendationCollections,
-    getRecommendationCacheDebug
+    getRecommendationCacheDebug,
+    warmPersonalizedRecommendationCache
 } from '../services/recommendationService.js';
 import '../middleware/authMiddleware.js';
 
@@ -313,6 +314,26 @@ export const setRecommendationCollectionsHandler = async (req: Request, res: Res
         res.status(200).json({ collections: result });
     } catch (error) {
         console.error("Error setting recommendation collections:", error);
+        next(error);
+    }
+};
+
+/**
+ * POST /api/recommendations/warm
+ * Fire-and-forget cache warming for the authenticated user.
+ * Triggers background generation of the main recommendation cache entries
+ * so that subsequent fetches return instantly from warm cache.
+ */
+export const warmRecommendationCacheHandler = async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+        warmPersonalizedRecommendationCache(req.userId);
+        res.status(202).json({ message: "Cache warming started" });
+    } catch (error) {
+        console.error("Error triggering recommendation cache warm:", error);
         next(error);
     }
 };

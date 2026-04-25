@@ -16,10 +16,11 @@ import { ImageOff, Star, Play, User, Bookmark, MoreHorizontal, Loader2, Plus, Cl
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import {
-    getCategoryRecommendationsQueryKey,
-    getForYouRecommendationsQueryKey,
     getPreferencesQueryKey,
+    setNotInterestedStatusBatchQueryData,
+    setWatchedStatusBatchQueryData,
 } from '@/lib/recommendationQueries';
+import { useWarmRecommendations } from '@/App';
 import { toast } from 'sonner';
 import { ReviewSection } from '@/components/reviews/ReviewSection';
 
@@ -160,6 +161,7 @@ const CollectionSection = ({ collectionId, currentMediaId }: { collectionId: num
 const MovieDetail = () => {
     const { mediaType, mediaId } = useParams<{ mediaType: 'movie' | 'tv', mediaId: string }>();
     const { isLoggedIn, user: currentUser } = useAuth();
+    const { warmRecommendations } = useWarmRecommendations();
     const queryClient = useQueryClient();
 
     const isMovie = mediaType === 'movie';
@@ -388,41 +390,47 @@ const MovieDetail = () => {
     const toggleWatchedMutation = useMutation({
         mutationFn: () => toggleWatchedStatusApi(collectionMediaId!),
         onMutate: async () => {
+            const nextIsWatched = !isWatched;
+            const watchedAt = nextIsWatched ? new Date().toISOString() : null;
+
             // Cancel outgoing refetches
             await queryClient.cancelQueries({ queryKey: watchedQueryKey });
             await queryClient.cancelQueries({ queryKey: ['watchedBatch'] });
             
             // Snapshot previous value
             const previousData = queryClient.getQueryData<{ isWatched: boolean; watchedAt: string | null }>(watchedQueryKey);
+            const previousBatchData = queryClient.getQueriesData({ queryKey: ['watchedBatch'] });
             
             // Optimistically update
             queryClient.setQueryData(watchedQueryKey, {
-                isWatched: !isWatched,
-                watchedAt: isWatched ? null : new Date().toISOString(),
+                isWatched: nextIsWatched,
+                watchedAt,
             });
+            setWatchedStatusBatchQueryData(queryClient, collectionMediaId!, nextIsWatched, watchedAt);
             
-            return { previousData };
+            return { previousData, previousBatchData };
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['watched'] });
-            queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
+        onSuccess: (data) => {
+            setWatchedStatusBatchQueryData(
+                queryClient,
+                collectionMediaId!,
+                data.isWatched,
+                data.isWatched ? new Date().toISOString() : null,
+            );
+            queryClient.invalidateQueries({ queryKey: ['watched'], refetchType: 'none' });
+            queryClient.invalidateQueries({ queryKey: ['watchedBatch'], refetchType: 'none' });
             queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
-            if (currentUser?.id) {
-                queryClient.invalidateQueries({
-                    queryKey: getForYouRecommendationsQueryKey(currentUser.id),
-                    refetchType: 'none',
-                });
-                queryClient.invalidateQueries({
-                    queryKey: getCategoryRecommendationsQueryKey(currentUser.id),
-                    refetchType: 'none',
-                });
-            }
+            // Warm server cache so the next set of recs reflects this change
+            warmRecommendations();
         },
         onError: (_error: Error, _, context) => {
             // Rollback on error
             if (context?.previousData) {
                 queryClient.setQueryData(watchedQueryKey, context.previousData);
             }
+            context?.previousBatchData.forEach(([queryKey, data]) => {
+                queryClient.setQueryData(queryKey, data);
+            });
             toast.error('Failed to update watched status');
         },
     });
@@ -441,37 +449,43 @@ const MovieDetail = () => {
     const toggleNotInterestedMutation = useMutation({
         mutationFn: () => toggleNotInterestedStatusApi(collectionMediaId!),
         onMutate: async () => {
+            const nextIsNotInterested = !isNotInterested;
+            const notInterestedAt = nextIsNotInterested ? new Date().toISOString() : null;
+
             await queryClient.cancelQueries({ queryKey: notInterestedQueryKey });
             await queryClient.cancelQueries({ queryKey: ['notInterestedBatch'] });
 
             const previousData = queryClient.getQueryData<{ isNotInterested: boolean; notInterestedAt: string | null }>(notInterestedQueryKey);
+            const previousBatchData = queryClient.getQueriesData({ queryKey: ['notInterestedBatch'] });
 
             queryClient.setQueryData(notInterestedQueryKey, {
-                isNotInterested: !isNotInterested,
-                notInterestedAt: isNotInterested ? null : new Date().toISOString(),
+                isNotInterested: nextIsNotInterested,
+                notInterestedAt,
             });
+            setNotInterestedStatusBatchQueryData(queryClient, collectionMediaId!, nextIsNotInterested, notInterestedAt);
 
-            return { previousData };
+            return { previousData, previousBatchData };
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['notInterested'] });
-            queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
+        onSuccess: (data) => {
+            setNotInterestedStatusBatchQueryData(
+                queryClient,
+                collectionMediaId!,
+                data.isNotInterested,
+                data.isNotInterested ? new Date().toISOString() : null,
+            );
+            queryClient.invalidateQueries({ queryKey: ['notInterested'], refetchType: 'none' });
+            queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'], refetchType: 'none' });
             queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
-            if (currentUser?.id) {
-                queryClient.invalidateQueries({
-                    queryKey: getForYouRecommendationsQueryKey(currentUser.id),
-                    refetchType: 'none',
-                });
-                queryClient.invalidateQueries({
-                    queryKey: getCategoryRecommendationsQueryKey(currentUser.id),
-                    refetchType: 'none',
-                });
-            }
+            // Warm server cache so the next set of recs reflects this change
+            warmRecommendations();
         },
         onError: (_error: Error, _, context) => {
             if (context?.previousData) {
                 queryClient.setQueryData(notInterestedQueryKey, context.previousData);
             }
+            context?.previousBatchData.forEach(([queryKey, data]) => {
+                queryClient.setQueryData(queryKey, data);
+            });
             toast.error('Failed to update not interested status');
         },
     });

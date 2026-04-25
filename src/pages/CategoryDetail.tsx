@@ -22,8 +22,10 @@ import { CategoryRecommendationsResponse, UserPreferences } from "@/lib/types";
 import {
   CATEGORY_OVERVIEW_FETCH_LIMIT,
   dedupeRecommendations,
+  excludeFeedbackRecommendations,
   getCategoryRecommendationsOverviewQueryKey,
   getPreferencesQueryKey,
+  getRecommendationMediaId,
   getSharedPersonalizedGenreInfiniteQueryOptions,
   getSharedPersonalizedTheatricalInfiniteQueryOptions,
   mergePreviewWithPagedRecommendations,
@@ -153,16 +155,24 @@ const CategoryDetail = () => {
     : 0;
 
   // Generate media IDs for watched status lookup
-  const mediaIds = useMemo(() => 
-    allMovies.map(movie => {
-      const isTV = mediaType === 'tv' || !!movie.first_air_date;
-      return isTV ? `${movie.id}tv` : String(movie.id);
-    }),
+  const mediaIds = useMemo(
+    () => allMovies.map((movie) => getRecommendationMediaId(movie, mediaType as 'movie' | 'tv')),
     [allMovies, mediaType]
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
   const { notInterestedMap } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
+  const visibleMovies = useMemo(
+    () => showPersonalized
+      ? excludeFeedbackRecommendations(
+          allMovies,
+          watchedMap,
+          showNotInterested ? notInterestedMap : {},
+          mediaType as 'movie' | 'tv',
+        )
+      : allMovies,
+    [allMovies, watchedMap, notInterestedMap, showPersonalized, showNotInterested, mediaType]
+  );
 
   // Infinite scroll with Intersection Observer
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -243,12 +253,11 @@ const CategoryDetail = () => {
               </div>
             ))}
           </div>
-        ) : allMovies.length > 0 ? (
+        ) : visibleMovies.length > 0 ? (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-              {allMovies.map((movie, index) => {
-                const isTV = mediaType === 'tv' || !!movie.first_air_date;
-                const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
+              {visibleMovies.map((movie, index) => {
+                const mediaId = getRecommendationMediaId(movie, mediaType as 'movie' | 'tv');
                 return (
                   <MovieCard
                     key={`${movie.id}-${index}`}

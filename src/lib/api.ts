@@ -185,6 +185,14 @@ export const fetchRecommendationCacheDebugApi = async (): Promise<Recommendation
     return fetchBackend('/recommendations/debug/cache');
 };
 
+/**
+ * Fire-and-forget request to warm the recommendation cache on the server.
+ * Returns immediately (202) while the server generates cache entries in the background.
+ */
+export const warmRecommendationCacheApi = async (): Promise<void> => {
+    await fetchBackend('/recommendations/warm', { method: 'POST' });
+};
+
 // --- Collection API Functions (No changes needed, use fetchBackend) ---
 export const fetchUserCollectionsApi = async (): Promise<UserCollectionsResponse> => {
     return fetchBackend('/collections');

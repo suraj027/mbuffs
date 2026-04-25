@@ -14,7 +14,6 @@ import {
   getCategoryRecommendationsOverviewQueryKey,
   getPreferencesQueryKey,
   getSharedPersonalizedTheatricalInfiniteQueryOptions,
-  selectCategoryPreviewRecommendations,
 } from "@/lib/recommendationQueries";
 
 // Popular genres to feature (subset for better UX)
@@ -172,7 +171,7 @@ function PersonalizedCategoriesContent({ userId, mediaType, showNotInterested }:
         <GenreRow
           key={`personalized-${mediaType}-${category.genre.id}`}
           genre={category.genre}
-          movies={selectCategoryPreviewRecommendations(category.results, DISPLAY_LIMIT)}
+          movies={category.results}
           mediaType={mediaType}
           isLoading={false}
           limit={DISPLAY_LIMIT}
@@ -265,12 +264,10 @@ function PersonalizedTheatricalReleasesRow({ userId, showNotInterested = true }:
     enabled: !!userId,
   });
 
-  const previewMovies = selectCategoryPreviewRecommendations(data?.pages[0]?.results ?? []);
-
   return (
     <GenreRow
       title="Theatrical Releases"
-      movies={previewMovies}
+      movies={data?.pages[0]?.results ?? []}
       mediaType="movie"
       isLoading={isLoading}
       limit={10}

@@ -21,7 +21,6 @@ import {
     getCategoryRecommendationsQueryKey,
     getForYouRecommendationsQueryKey,
     getPreferencesQueryKey,
-    getSharedForYouInfiniteQueryOptions,
 } from '@/lib/recommendationQueries';
 
 // ============================================================================
@@ -198,6 +197,7 @@ const Profile = () => {
         onSuccess: () => {
             if (!user?.id) return;
             queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
+            queryClient.invalidateQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
         },
     });
 
@@ -220,7 +220,6 @@ const Profile = () => {
                 if (enabled) {
                     queryClient.invalidateQueries({ queryKey: getForYouRecommendationsQueryKey(user.id) });
                     queryClient.invalidateQueries({ queryKey: getCategoryRecommendationsQueryKey(user.id) });
-                    void queryClient.prefetchInfiniteQuery(getSharedForYouInfiniteQueryOptions(user.id));
                     return;
                 }
 

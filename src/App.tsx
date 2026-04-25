@@ -1,15 +1,13 @@
-import React, { Suspense, lazy, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, createContext, useContext } from 'react';
 import { Toaster } from "@/components/ui/toaster"; // Keep this Toaster
 import { Toaster as Sonner } from "@/components/ui/sonner"; // Keep Sonner
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BottomNav } from "@/components/BottomNav";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigationType } from "react-router-dom";
-import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
+import { useRecommendationPrefetch } from './hooks/useRecommendationPrefetch';
 import { Loader2 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast"; // Import the correct useToast
-import { fetchUserPreferencesApi } from '@/lib/api';
-import { FOR_YOU_QUERY_STALE_TIME, getPreferencesQueryKey, getSharedForYouInfiniteQueryOptions } from '@/lib/recommendationQueries';
 
 const Index = lazy(() => import("./pages/Index"));
 const Search = lazy(() => import("./pages/Search"));
@@ -49,71 +47,27 @@ const RouteLoadingFallback = () => (
   </div>
 );
 
-const AppPrefetchers = () => {
-  const queryClient = useQueryClient();
-  const { user, isLoadingUser } = useAuth();
-  const prefetchedForUserRef = useRef<string | null>(null);
-  const prefetchingForUserRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (isLoadingUser) return;
-
-    if (!user?.id) {
-      prefetchedForUserRef.current = null;
-      prefetchingForUserRef.current = null;
-      return;
-    }
-
-    if (prefetchedForUserRef.current === user.id || prefetchingForUserRef.current === user.id) {
-      return;
-    }
-
-    let isCancelled = false;
-    prefetchingForUserRef.current = user.id;
-
-    const prefetchRecommendations = async () => {
-      try {
-        const preferences = await queryClient.ensureQueryData({
-          queryKey: getPreferencesQueryKey(user.id),
-          queryFn: fetchUserPreferencesApi,
-          staleTime: FOR_YOU_QUERY_STALE_TIME,
-        });
-
-        if (isCancelled) return;
-        if (!preferences?.preferences?.recommendations_enabled) {
-          prefetchedForUserRef.current = user.id;
-          return;
-        }
-
-        await queryClient.prefetchInfiniteQuery(getSharedForYouInfiniteQueryOptions(user.id));
-
-        if (!isCancelled) {
-          prefetchedForUserRef.current = user.id;
-        }
-      } catch {
-        // Best-effort prefetch only; page-level query handles errors.
-      } finally {
-        if (prefetchingForUserRef.current === user.id) {
-          prefetchingForUserRef.current = null;
-        }
-      }
-    };
-
-    void prefetchRecommendations();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [isLoadingUser, user?.id, queryClient]);
-
-  return null;
+// Context to expose recommendation cache warming to any component
+type RecommendationPrefetchContextType = {
+  warmRecommendations: () => void;
 };
 
-// AuthProvider wrapper to initialize auth and handle token from URL
+const RecommendationPrefetchContext = createContext<RecommendationPrefetchContextType>({
+  warmRecommendations: () => {},
+});
+
+export const useWarmRecommendations = () => useContext(RecommendationPrefetchContext);
+
+// AuthProvider wrapper to initialize auth, prefetch recommendations, and expose warming
 const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Initialize the auth hook. The useEffect inside useAuth handles the token from URL.
   useAuth();
-  return <>{children}</>; // Render children once auth is initialized
+  const { warmRecommendations } = useRecommendationPrefetch();
+  return (
+    <RecommendationPrefetchContext.Provider value={{ warmRecommendations }}>
+      {children}
+    </RecommendationPrefetchContext.Provider>
+  );
 };
 
 const App = () => (
@@ -123,7 +77,6 @@ const App = () => (
     <BrowserRouter>
       <ScrollToTop />
       <AuthProvider>
-        <AppPrefetchers />
         <Suspense fallback={<RouteLoadingFallback />}>
           <Routes>
             {/* Public Routes */}

@@ -5,10 +5,11 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  getCategoryRecommendationsQueryKey,
-  getForYouRecommendationsQueryKey,
   getPreferencesQueryKey,
+  setNotInterestedStatusBatchQueryData,
+  setWatchedStatusBatchQueryData,
 } from "@/lib/recommendationQueries";
+import { useWarmRecommendations } from "@/App";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ export function MovieCard({
   const shouldShowBecauseYouLiked = meetsExplainabilityCondition && randomBucket === 0;
   
   const { isLoggedIn, user } = useAuth();
+  const { warmRecommendations } = useWarmRecommendations();
   const preferencesQueryKey = getPreferencesQueryKey(user?.id);
   const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
     queryKey: preferencesQueryKey,
@@ -81,32 +83,49 @@ export function MovieCard({
     mutationFn: () => toggleWatchedStatusApi(mediaId),
     onMutate: async () => {
       const newValue = !displayedWatched;
+      const watchedAt = newValue ? new Date().toISOString() : null;
       setOptimisticWatched(newValue);
       
       await queryClient.cancelQueries({ queryKey: ['watched', mediaId] });
       await queryClient.cancelQueries({ queryKey: ['watchedBatch'] });
-      
-      return { previousWatched: displayedWatched };
+
+      const previousWatchedData = queryClient.getQueryData(['watched', mediaId]);
+      const previousWatchedBatchData = queryClient.getQueriesData({ queryKey: ['watchedBatch'] });
+
+      queryClient.setQueryData(['watched', mediaId], {
+        isWatched: newValue,
+        watchedAt,
+      });
+      setWatchedStatusBatchQueryData(queryClient, mediaId, newValue, watchedAt);
+
+      return { previousWatched: displayedWatched, previousWatchedData, previousWatchedBatchData };
     },
     onSuccess: (data) => {
       setOptimisticWatched(data.isWatched);
-      queryClient.invalidateQueries({ queryKey: ['watched'] });
-      queryClient.invalidateQueries({ queryKey: ['watchedBatch'] });
+      setWatchedStatusBatchQueryData(
+        queryClient,
+        mediaId,
+        data.isWatched,
+        data.isWatched ? new Date().toISOString() : null,
+      );
+      // Mark watched queries as stale for future mounts without triggering
+      // immediate refetches – the optimistic data is already accurate.
+      queryClient.invalidateQueries({ queryKey: ['watched'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['watchedBatch'], refetchType: 'none' });
       queryClient.invalidateQueries({ queryKey: ['collections', 'watched', 'items'] });
-      if (user?.id) {
-        queryClient.invalidateQueries({
-          queryKey: getForYouRecommendationsQueryKey(user.id),
-          refetchType: 'none',
-        });
-        queryClient.invalidateQueries({
-          queryKey: getCategoryRecommendationsQueryKey(user.id),
-          refetchType: 'none',
-        });
-      }
+      // Warm server cache so the next set of recs reflects this change.
+      // No need to invalidate recommendation queries – client-side filtering
+      // already hides watched items and warmRecommendations refreshes the
+      // server cache in the background.
+      warmRecommendations();
     },
     onError: (_error: Error, _, context) => {
       if (context) {
         setOptimisticWatched(context.previousWatched);
+        queryClient.setQueryData(['watched', mediaId], context.previousWatchedData);
+        context.previousWatchedBatchData.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
       }
       toast.error('Failed to update watched status');
     },
@@ -116,32 +135,44 @@ export function MovieCard({
     mutationFn: () => toggleNotInterestedStatusApi(mediaId),
     onMutate: async () => {
       const newValue = !displayedNotInterested;
+      const notInterestedAt = newValue ? new Date().toISOString() : null;
       setOptimisticNotInterested(newValue);
 
       await queryClient.cancelQueries({ queryKey: ['notInterested', mediaId] });
       await queryClient.cancelQueries({ queryKey: ['notInterestedBatch'] });
 
-      return { previousNotInterested: displayedNotInterested };
+      const previousNotInterestedData = queryClient.getQueryData(['notInterested', mediaId]);
+      const previousNotInterestedBatchData = queryClient.getQueriesData({ queryKey: ['notInterestedBatch'] });
+
+      queryClient.setQueryData(['notInterested', mediaId], {
+        isNotInterested: newValue,
+        notInterestedAt,
+      });
+      setNotInterestedStatusBatchQueryData(queryClient, mediaId, newValue, notInterestedAt);
+
+      return { previousNotInterested: displayedNotInterested, previousNotInterestedData, previousNotInterestedBatchData };
     },
     onSuccess: (data) => {
       setOptimisticNotInterested(data.isNotInterested);
-      queryClient.invalidateQueries({ queryKey: ['notInterested'] });
-      queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'] });
+      setNotInterestedStatusBatchQueryData(
+        queryClient,
+        mediaId,
+        data.isNotInterested,
+        data.isNotInterested ? new Date().toISOString() : null,
+      );
+      queryClient.invalidateQueries({ queryKey: ['notInterested'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['notInterestedBatch'], refetchType: 'none' });
       queryClient.invalidateQueries({ queryKey: ['collections', 'not-interested', 'items'] });
-      if (user?.id) {
-        queryClient.invalidateQueries({
-          queryKey: getForYouRecommendationsQueryKey(user.id),
-          refetchType: 'none',
-        });
-        queryClient.invalidateQueries({
-          queryKey: getCategoryRecommendationsQueryKey(user.id),
-          refetchType: 'none',
-        });
-      }
+      // Warm server cache so the next set of recs reflects this change
+      warmRecommendations();
     },
     onError: (_error: Error, _, context) => {
       if (context) {
         setOptimisticNotInterested(context.previousNotInterested);
+        queryClient.setQueryData(['notInterested', mediaId], context.previousNotInterestedData);
+        context.previousNotInterestedBatchData.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
       }
       toast.error('Failed to update not interested status');
     },

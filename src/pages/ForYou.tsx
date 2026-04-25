@@ -13,6 +13,8 @@ import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { UserPreferences } from "@/lib/types";
 import {
   dedupeForYouRecommendations,
+  excludeFeedbackRecommendations,
+  getRecommendationMediaId,
   getPreferencesQueryKey,
   getSharedForYouInfiniteQueryOptions,
 } from "@/lib/recommendationQueries";
@@ -46,22 +48,30 @@ const ForYou = () => {
   });
 
   // Deduplicate movies by ID to prevent showing same items multiple times
-  const allMovies = dedupeForYouRecommendations(data?.pages.flatMap((page) => page.results) ?? []);
+  const allMovies = useMemo(
+    () => dedupeForYouRecommendations(data?.pages.flatMap((page) => page.results) ?? []),
+    [data]
+  );
   const totalResults = data?.pages[0]?.total_results || 0;
   const sourceCollections = data?.pages[0]?.sourceCollections || [];
   const totalSourceItems = data?.pages[0]?.totalSourceItems || 0;
 
   // Generate media IDs for watched status lookup
-  const mediaIds = useMemo(() => 
-    allMovies.map(movie => {
-      const isTV = !!movie.first_air_date;
-      return isTV ? `${movie.id}tv` : String(movie.id);
-    }),
+  const mediaIds = useMemo(
+    () => allMovies.map((movie) => getRecommendationMediaId(movie)),
     [allMovies]
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
   const { notInterestedMap } = useNotInterestedStatus(recommendationsEnabled ? mediaIds : []);
+  const visibleMovies = useMemo(
+    () => excludeFeedbackRecommendations(
+      allMovies,
+      watchedMap,
+      recommendationsEnabled ? notInterestedMap : {},
+    ),
+    [allMovies, watchedMap, notInterestedMap, recommendationsEnabled]
+  );
 
   // Infinite scroll with Intersection Observer
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -222,12 +232,11 @@ const ForYou = () => {
               </div>
             ))}
           </div>
-        ) : allMovies.length > 0 ? (
+        ) : visibleMovies.length > 0 ? (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-              {allMovies.map((movie, index) => {
-                const isTV = !!movie.first_air_date;
-                const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
+              {visibleMovies.map((movie, index) => {
+                const mediaId = getRecommendationMediaId(movie);
                 return (
                   <MovieCard
                     key={`${movie.id}-${index}`}

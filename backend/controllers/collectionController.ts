@@ -17,8 +17,10 @@ import {
     CollectionRow
 } from '../lib/types.js'; 
 import {
+    expireRecommendationCache,
     invalidateRecommendationCache,
-    invalidateRecommendationCacheByCollection
+    invalidateRecommendationCacheByCollection,
+    warmPersonalizedRecommendationCache
 } from '../services/recommendationService.js';
 
 interface CollectionDetailsResponse {
@@ -662,7 +664,8 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
                 DELETE FROM collection_movies 
                 WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
             `;
-            await invalidateRecommendationCache(userId);
+            await expireRecommendationCache(userId);
+            warmPersonalizedRecommendationCache(userId);
             res.status(200).json({ isWatched: false, message: 'Removed from watched' });
         } else {
             // Add to watched
@@ -671,7 +674,8 @@ export const toggleWatchedStatus = async (req: Request, res: Response, next: Nex
                 INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id)
                 VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
             `;
-            await invalidateRecommendationCache(userId);
+            await expireRecommendationCache(userId);
+            warmPersonalizedRecommendationCache(userId);
             res.status(200).json({ isWatched: true, message: 'Added to watched' });
         }
     } catch (error) {
@@ -825,7 +829,8 @@ export const toggleNotInterestedStatus = async (req: Request, res: Response, nex
                 DELETE FROM collection_movies 
                 WHERE collection_id = ${collectionId} AND movie_id = ${mediaId}
             `;
-            await invalidateRecommendationCache(userId);
+            await expireRecommendationCache(userId);
+            warmPersonalizedRecommendationCache(userId);
             res.status(200).json({ isNotInterested: false, message: 'Removed from not interested' });
         } else {
             const newEntryId = generateId(21);
@@ -833,7 +838,8 @@ export const toggleNotInterestedStatus = async (req: Request, res: Response, nex
                 INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id)
                 VALUES (${newEntryId}, ${collectionId}, ${mediaId}, ${userId})
             `;
-            await invalidateRecommendationCache(userId);
+            await expireRecommendationCache(userId);
+            warmPersonalizedRecommendationCache(userId);
             res.status(200).json({ isNotInterested: true, message: 'Added to not interested' });
         }
     } catch (error) {

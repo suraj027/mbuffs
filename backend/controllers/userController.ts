@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { sql } from '../lib/db.js';
 import { UserPreferences, UpdateUserPreferencesInput } from '../lib/types.js';
-import { invalidateRecommendationCache } from '../services/recommendationService.js';
+import { invalidateRecommendationCache, warmPersonalizedRecommendationCache } from '../services/recommendationService.js';
 // Import to ensure Express Request extension is applied
 import '../middleware/authMiddleware.js';
 
@@ -130,6 +130,9 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
 
         if (shouldInvalidateRecommendationCache) {
             await invalidateRecommendationCache(req.userId);
+            if (newRecommendationsEnabled) {
+                warmPersonalizedRecommendationCache(req.userId);
+            }
         }
 
         const preferences: UserPreferences = {

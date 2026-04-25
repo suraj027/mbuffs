@@ -13,6 +13,9 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { UserPreferences } from '@/lib/types';
 import {
+  dedupeForYouRecommendations,
+  excludeFeedbackRecommendations,
+  getRecommendationMediaId,
   getPreferencesQueryKey,
   getSharedForYouInfiniteQueryOptions,
   selectForYouPreviewRecommendations,
@@ -59,23 +62,30 @@ const Index = () => {
 
   const trendingContent = trendingContentData?.results?.slice(0, 50) || [];
   const firstRecommendationsPage = recommendationsData?.pages?.[0];
-  const recommendations = useMemo(
-    () => selectForYouPreviewRecommendations(firstRecommendationsPage?.results ?? []),
+  const recommendationCandidates = useMemo(
+    () => dedupeForYouRecommendations(firstRecommendationsPage?.results ?? []),
     [firstRecommendationsPage]
   );
-  const hasRecommendations = recommendationsEnabled && recommendations.length > 0;
 
   // Generate media IDs for watched status lookup (recommendations only)
-  const recommendationMediaIds = useMemo(() => 
-    recommendations.map(movie => {
-      const isTV = !!movie.first_air_date;
-      return isTV ? `${movie.id}tv` : String(movie.id);
-    }),
-    [recommendations]
+  const recommendationMediaIds = useMemo(
+    () => recommendationCandidates.map((movie) => getRecommendationMediaId(movie)),
+    [recommendationCandidates]
   );
 
   const { watchedMap } = useWatchedStatus(recommendationMediaIds);
   const { notInterestedMap } = useNotInterestedStatus(recommendationsEnabled ? recommendationMediaIds : []);
+  const recommendations = useMemo(
+    () => selectForYouPreviewRecommendations(
+      excludeFeedbackRecommendations(
+        recommendationCandidates,
+        watchedMap,
+        recommendationsEnabled ? notInterestedMap : {},
+      ),
+    ),
+    [recommendationCandidates, watchedMap, notInterestedMap, recommendationsEnabled]
+  );
+  const hasRecommendations = recommendationsEnabled && recommendations.length > 0;
 
   // For You scroll functionality
   const forYouScrollRef = useRef<HTMLDivElement>(null);
@@ -165,8 +175,7 @@ const Index = () => {
                       className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide scroll-smooth px-4 pr-16"
                     >
                       {recommendations.map((movie) => {
-                        const isTV = !!movie.first_air_date;
-                        const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
+                        const mediaId = getRecommendationMediaId(movie);
                         return (
                           <div key={movie.id} className="shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
                             <MovieCard

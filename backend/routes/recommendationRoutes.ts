@@ -8,7 +8,8 @@ import {
     getRecommendationCacheDebugHandler,
     addRecommendationCollectionHandler,
     removeRecommendationCollectionHandler,
-    setRecommendationCollectionsHandler
+    setRecommendationCollectionsHandler,
+    warmRecommendationCacheHandler
 } from '../controllers/recommendationController.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 
@@ -31,6 +32,9 @@ router.get('/collections', requireAuth as RequestHandler, getRecommendationColle
 
 // GET /api/recommendations/debug/cache - Recommendation cache debug endpoint (restricted)
 router.get('/debug/cache', requireAuth as RequestHandler, getRecommendationCacheDebugHandler as RequestHandler);
+
+// POST /api/recommendations/warm - Fire-and-forget cache warming
+router.post('/warm', requireAuth as RequestHandler, warmRecommendationCacheHandler as RequestHandler);
 
 // POST /api/recommendations/collections - Add a collection to recommendation sources
 router.post('/collections', requireAuth as RequestHandler, addRecommendationCollectionHandler as RequestHandler);

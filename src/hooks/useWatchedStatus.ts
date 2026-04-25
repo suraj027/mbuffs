@@ -1,10 +1,15 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { getWatchedStatusBatchApi } from '@/lib/api';
 import { useAuth } from './useAuth';
 
 /**
  * Hook to fetch watched status for a list of movies/shows
  * Returns a map of mediaId -> isWatched boolean
+ *
+ * Uses keepPreviousData so that when the mediaIds list grows (e.g. infinite
+ * scroll appends a new page), the existing watched statuses stay visible
+ * while the expanded batch query loads – preventing items from flashing
+ * back into view.
  */
 export function useWatchedStatus(mediaIds: string[]) {
     const { isLoggedIn } = useAuth();
@@ -14,6 +19,7 @@ export function useWatchedStatus(mediaIds: string[]) {
         queryFn: () => getWatchedStatusBatchApi(mediaIds),
         enabled: isLoggedIn && mediaIds.length > 0,
         staleTime: 30000, // Consider data fresh for 30 seconds
+        placeholderData: keepPreviousData,
     });
 
     const watchedMap: Record<string, boolean> = {};

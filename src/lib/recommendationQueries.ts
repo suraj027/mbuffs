@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import {
   fetchGenreRecommendationsApi,
   fetchRecommendationsApi,
@@ -72,6 +73,80 @@ const getPagedRecommendationsInfiniteQueryOptions = (
 });
 
 type RecommendationWithId = { id: number };
+type RecommendationWithMediaId = RecommendationWithId & {
+  first_air_date?: string;
+  media_type?: 'movie' | 'tv' | 'person';
+};
+
+type WatchedBatchData = {
+  watchedStatus: Record<string, { isWatched: boolean; watchedAt: string | null }>;
+};
+
+type NotInterestedBatchData = {
+  notInterestedStatus: Record<string, { isNotInterested: boolean; notInterestedAt: string | null }>;
+};
+
+export const getRecommendationMediaId = (
+  recommendation: RecommendationWithMediaId,
+  mediaType?: 'movie' | 'tv',
+): string => {
+  const isTV = mediaType === 'tv' || recommendation.media_type === 'tv' || !!recommendation.first_air_date;
+  return isTV ? `${recommendation.id}tv` : String(recommendation.id);
+};
+
+export const excludeFeedbackRecommendations = <T extends RecommendationWithMediaId>(
+  recommendations: T[],
+  watchedMap: Record<string, boolean>,
+  notInterestedMap: Record<string, boolean> = {},
+  mediaType?: 'movie' | 'tv',
+): T[] => recommendations.filter((recommendation) => {
+  const mediaId = getRecommendationMediaId(recommendation, mediaType);
+  return !watchedMap[mediaId] && !notInterestedMap[mediaId];
+});
+
+export const setWatchedStatusBatchQueryData = (
+  queryClient: QueryClient,
+  mediaId: string,
+  isWatched: boolean,
+  watchedAt: string | null,
+) => {
+  const queries = queryClient.getQueryCache().findAll({ queryKey: ['watchedBatch'] });
+
+  for (const query of queries) {
+    if (!query.queryKey.includes(mediaId)) {
+      continue;
+    }
+
+    queryClient.setQueryData<WatchedBatchData>(query.queryKey, (old) => ({
+      watchedStatus: {
+        ...(old?.watchedStatus ?? {}),
+        [mediaId]: { isWatched, watchedAt },
+      },
+    }));
+  }
+};
+
+export const setNotInterestedStatusBatchQueryData = (
+  queryClient: QueryClient,
+  mediaId: string,
+  isNotInterested: boolean,
+  notInterestedAt: string | null,
+) => {
+  const queries = queryClient.getQueryCache().findAll({ queryKey: ['notInterestedBatch'] });
+
+  for (const query of queries) {
+    if (!query.queryKey.includes(mediaId)) {
+      continue;
+    }
+
+    queryClient.setQueryData<NotInterestedBatchData>(query.queryKey, (old) => ({
+      notInterestedStatus: {
+        ...(old?.notInterestedStatus ?? {}),
+        [mediaId]: { isNotInterested, notInterestedAt },
+      },
+    }));
+  }
+};
 
 export const dedupeRecommendations = <T extends RecommendationWithId>(
   recommendations: T[],

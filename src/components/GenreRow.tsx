@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useWatchedStatus } from "@/hooks/useWatchedStatus";
 import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
 import { useMemo } from "react";
+import { excludeFeedbackRecommendations, getRecommendationMediaId } from "@/lib/recommendationQueries";
 
 export interface GenreRowProps {
   genre?: Genre;
@@ -32,19 +33,28 @@ export function GenreRow({
   isPersonalized = false,
   showNotInterested = false
 }: GenreRowProps) {
-  const displayMovies = movies.slice(0, limit);
+  const candidateMovies = isPersonalized ? movies : movies.slice(0, limit);
   
   // Generate media IDs for watched status lookup
-  const mediaIds = useMemo(() => 
-    displayMovies.map(movie => {
-      const isTV = !!movie.first_air_date;
-      return isTV ? `${movie.id}tv` : String(movie.id);
-    }),
-    [displayMovies]
+  const mediaIds = useMemo(
+    () => candidateMovies.map((movie) => getRecommendationMediaId(movie, mediaType)),
+    [candidateMovies, mediaType]
   );
 
   const { watchedMap } = useWatchedStatus(mediaIds);
   const { notInterestedMap } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
+  const displayMovies = useMemo(
+    () => (isPersonalized
+      ? excludeFeedbackRecommendations(
+          candidateMovies,
+          watchedMap,
+          showNotInterested ? notInterestedMap : {},
+          mediaType,
+        )
+      : candidateMovies
+    ).slice(0, limit),
+    [candidateMovies, watchedMap, notInterestedMap, isPersonalized, showNotInterested, mediaType, limit]
+  );
 
   if (isLoading) {
     return (
@@ -102,8 +112,7 @@ export function GenreRow({
       <div className="relative -mx-4 px-4">
         <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide scroll-smooth">
           {displayMovies.map((movie) => {
-            const isTV = !!movie.first_air_date;
-            const mediaId = isTV ? `${movie.id}tv` : String(movie.id);
+            const mediaId = getRecommendationMediaId(movie, mediaType);
             return (
               <div
                 key={movie.id}
