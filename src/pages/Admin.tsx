@@ -80,6 +80,7 @@ const Admin = () => {
             category_recommendations_enabled: base?.category_recommendations_enabled ?? false,
             show_adult_items: base?.show_adult_items ?? false,
             show_reddit_label: enabled,
+            show_movie_card_info: base?.show_movie_card_info ?? false,
           },
         };
       });
