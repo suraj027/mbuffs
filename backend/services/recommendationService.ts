@@ -215,7 +215,7 @@ interface RecommendationCacheDebugEntry {
     payload_size: number;
 }
 
-const RECOMMENDATION_CACHE_VERSION = 'v5';
+const RECOMMENDATION_CACHE_VERSION = 'v6';
 const RECOMMENDATION_CACHE_TTL_MINUTES = 30;
 const RECOMMENDATION_CACHE_EXPIRED_RETENTION_MINUTES = 60 * 24;
 const RECOMMENDATION_CACHE_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
@@ -227,6 +227,8 @@ let recommendationCacheCleanupPromise: Promise<void> | null = null;
 const REDDIT_BOOST_ENABLED = true;
 const REDDIT_BOOST_MULTIPLIER = 30; // Points per mention
 const REDDIT_POSITIVE_SENTIMENT_BONUS = 20;
+const CATEGORY_FOR_YOU_POOL_MIN = 240;
+const CATEGORY_FOR_YOU_POOL_MAX = 500;
 const MIN_THEATRICAL_TMDB_PAGES_TO_FETCH = 3;
 const MAX_THEATRICAL_TMDB_PAGES_TO_FETCH = 12;
 
@@ -563,6 +565,16 @@ function getPrimaryGenre(item: TMDBMovie): number | null {
     }
 
     return item.genre_ids[0] ?? null;
+}
+
+function getItemMediaType(item: TMDBMovie): 'movie' | 'tv' {
+    const isTv = item.media_type === 'tv' || (!!item.first_air_date && !item.release_date);
+    return isTv ? 'tv' : 'movie';
+}
+
+async function getGenreNameMap(mediaType: 'movie' | 'tv'): Promise<Map<number, string>> {
+    const response = await fetchTMDB<{ genres: Genre[] }>(`/genre/${mediaType}/list`);
+    return new Map((response?.genres || []).map((genre) => [genre.id, genre.name]));
 }
 
 function addRetrievalChannel(channels: RetrievalChannel[] | undefined, channel: RetrievalChannel): RetrievalChannel[] {
@@ -2563,14 +2575,10 @@ export async function generateRecommendations(
  * but organizes the recommendations by genre/category.
  * 
  * Strategy:
- * 1. Build genre preference profile from user's recommendation source collections
- * 2. For each preferred genre, generate personalized recommendations
- * 3. Use TMDB discover API with genre filtering combined with:
- *    - Director preferences (from source collections)
- *    - Actor preferences (from source collections)
- *    - Base quality filters (vote count, rating)
- * 4. Score and rank items within each category
- * 5. Filter out items already in user's collections
+ * 1. Generate one ranked For You candidate pool using the main recommendation algorithm
+ * 2. Filter that pool to the requested media type
+ * 3. Order category rows by source-collection genre affinity when available
+ * 4. Fill each row from the already-ranked For You pool, deduping across rows
  */
 export async function generateCategoryRecommendations(
     userId: string,
@@ -2594,179 +2602,151 @@ export async function generateCategoryRecommendations(
         return emptyResult;
     }
 
-    // Also need base recommendations to be enabled (for source collections)
+    // Category recommendations are now a genre-bucketed view of the same ranked
+    // candidate set used by the For You feed. This keeps retrieval, Reddit
+    // signals, multi-objective ranking, diversity reranking, exploration, adult
+    // filtering, and exclusions aligned with the main recommendation surface.
     if (!userResult[0].recommendations_enabled) {
         return emptyResult;
     }
 
-    // Get source collections
-    const sourceCollections = await getUserRecommendationCollections(userId);
-    if (sourceCollections.length === 0) {
-        return emptyResult;
+    const normalizedLimit = Math.max(1, limit);
+    const forYouPoolLimit = Math.min(
+        Math.max(normalizedLimit * 8, CATEGORY_FOR_YOU_POOL_MIN),
+        CATEGORY_FOR_YOU_POOL_MAX
+    );
+
+    const forYouRecommendations = await generateRecommendations(userId, forYouPoolLimit, 1);
+    const sourceCollections = forYouRecommendations.sourceCollections;
+    const totalSourceItems = forYouRecommendations.totalSourceItems;
+
+    const rankedItems = forYouRecommendations.results.filter((item) => getItemMediaType(item) === mediaType);
+
+    if (rankedItems.length === 0) {
+        return {
+            ...emptyResult,
+            sourceCollections,
+            totalSourceItems
+        };
     }
 
-    // Get all movies from recommendation source collections
-    const sourceMovies = await getMoviesFromRecommendationCollections(userId);
-    if (sourceMovies.length === 0) {
-        return { ...emptyResult, sourceCollections };
+    const genreNameMap = await getGenreNameMap(mediaType);
+    const sourceGenreScores: Map<number, { id: number; name: string; count: number }> = new Map();
+
+    // Preserve the user's source-genre priority when possible, but do not build a
+    // separate recommendation pool here. The actual titles below all come from
+    // the For You algorithm above.
+    let sourceMovies: CollectionMovie[] = [];
+    const explicitSourceCollections = await getUserRecommendationCollections(userId);
+    if (explicitSourceCollections.length > 0) {
+        sourceMovies = await getMoviesFromRecommendationCollections(userId);
+    } else {
+        sourceMovies = await getWatchedSeedMovies(userId, 15);
     }
 
-    const sourceCollectionIds = sourceCollections.map(c => c.id);
-    const existingMovieIds = await getUserExcludedMovieIdsSnapshot(userId, sourceCollectionIds);
-
-    // Filter by media type FIRST, then sample
-    const sourceItemsOfType = sourceMovies.filter(movie => {
+    const sourceItemsOfType = sourceMovies.filter((movie) => {
         const { isMovie } = parseMovieId(movie.movie_id);
         return isMovie === (mediaType === 'movie');
     });
 
-    if (sourceItemsOfType.length === 0) {
-        return { ...emptyResult, sourceCollections, totalSourceItems: sourceMovies.length };
-    }
-
-    // Sample a subset to avoid rate limiting (max 15 for category recommendations to get more variety)
-    const sampleSize = Math.min(sourceItemsOfType.length, 15);
-    const sampledItems = deterministicSample(
+    const sampledSourceItems = deterministicSample(
         sourceItemsOfType,
-        sampleSize,
-        `${userId}:categories:${mediaType}:${limit}:${sourceItemsOfType.length}`,
+        Math.min(sourceItemsOfType.length, 15),
+        `${userId}:category-genre-profile:${mediaType}:${sourceItemsOfType.length}`,
         (item) => item.movie_id
     );
 
-    // Build genre profile and collect all recommendations (same as For You page)
-    const genreScores: Map<number, { id: number; name: string; count: number }> = new Map();
-    const allRecommendations: Map<string, RecommendationCandidate> = new Map();
-    const isMovie = mediaType === 'movie';
+    await Promise.all(sampledSourceItems.map(async (movie) => {
+        const { id, isMovie } = parseMovieId(movie.movie_id);
+        const details = await getItemDetails(id, isMovie);
 
-    // Fetch details, recommendations, and similar for each sampled source item
-    const fetchPromises = sampledItems.map(async (movie) => {
-        const { id, isMovie: itemIsMovie } = parseMovieId(movie.movie_id);
-
-        const [details, recommendations, similar] = await Promise.all([
-            getItemDetails(id, itemIsMovie),
-            getRecommendationsForItem(id, itemIsMovie),
-            getSimilarForItem(id, itemIsMovie)
-        ]);
-
-        // Build genre profile with names
-        if (details?.genres) {
-            details.genres.forEach(genre => {
-                const existing = genreScores.get(genre.id);
-                if (existing) {
-                    existing.count += 1;
-                } else {
-                    genreScores.set(genre.id, { id: genre.id, name: genre.name, count: 1 });
-                }
-            });
+        if (!details?.genres) {
+            return;
         }
 
-        return { recommendations, similar };
-    });
-
-    const results = await Promise.all(fetchPromises);
-
-    // Process all recommendations from TMDB recommendations/similar (same scoring as For You)
-    results.forEach(({ recommendations, similar }) => {
-        const allItems = [...recommendations, ...similar];
-        
-        allItems.forEach(item => {
-            // Create a unique key for deduplication
-            const key = isMovie ? `${item.id}` : `${item.id}tv`;
-            
-            // Skip items already in user's collections
-            if (existingMovieIds.has(key)) return;
-            
-            // Calculate genre match score
-            let genreMatchScore = 0;
-            if (item.genre_ids) {
-                item.genre_ids.forEach(genreId => {
-                    const genreInfo = genreScores.get(genreId);
-                    genreMatchScore += genreInfo?.count || 0;
-                });
-            }
-            
-            // Calculate combined score (same as For You)
-            const baseScore = (item.vote_average || 0) * 10;
-            const popularityScore = Math.min((item.popularity || 0) / 10, 50);
-            const genreBoost = genreMatchScore * 5;
-            const combinedScore = baseScore + popularityScore + genreBoost;
-            const matchedGenres = (item.genre_ids || []).filter((genreId) => (genreScores.get(genreId)?.count || 0) > 0);
-            
-            const existing = allRecommendations.get(key);
+        for (const genre of details.genres) {
+            const existing = sourceGenreScores.get(genre.id);
             if (existing) {
-                // Item appeared from multiple sources - boost its score
-                existing.sources += 1;
-                const sourceBoost = existing.sources * 20;
-                existing.score = combinedScore + sourceBoost;
-                const explainability = existing.item.explainability;
-                if (explainability) {
-                    explainability.source_appearances = existing.sources;
-                    explainability.matched_genres = matchedGenres;
-                    explainability.score_breakdown.base = baseScore;
-                    explainability.score_breakdown.popularity = popularityScore;
-                    explainability.score_breakdown.genre = genreBoost;
-                    explainability.score_breakdown.source_boost = sourceBoost;
-                    explainability.score_breakdown.total = existing.score;
-                }
+                existing.count += 1;
             } else {
-                allRecommendations.set(key, {
-                    item: {
-                        ...item,
-                        explainability: {
-                            reason_codes: matchedGenres.length > 0
-                                ? ['tmdb_recommendation_or_similar', 'genre_match', 'category_match']
-                                : ['tmdb_recommendation_or_similar', 'category_match'],
-                            source_appearances: 1,
-                            matched_genres: matchedGenres,
-                            score_breakdown: {
-                                base: baseScore,
-                                popularity: popularityScore,
-                                genre: genreBoost,
-                                source_boost: 0,
-                                director_boost: 0,
-                                actor_boost: 0,
-                                primary_boost: 0,
-                                reddit_boost: 0,
-                                total: combinedScore
-                            }
-                        }
-                    },
-                    score: combinedScore,
-                    sources: 1
+                sourceGenreScores.set(genre.id, {
+                    id: genre.id,
+                    name: genre.name || genreNameMap.get(genre.id) || `Genre ${genre.id}`,
+                    count: 1
                 });
             }
-        });
+        }
+    }));
+
+    // Add any genres that appear in the For You-ranked pool so sparse profiles,
+    // watched-history fallback, and cold-start users can still get category rows.
+    const recommendationGenreScores = new Map<number, { id: number; name: string; count: number; rankScore: number }>();
+    rankedItems.forEach((item, index) => {
+        for (const genreId of item.genre_ids || []) {
+            const existing = recommendationGenreScores.get(genreId);
+            if (existing) {
+                existing.count += 1;
+                existing.rankScore += rankedItems.length - index;
+            } else {
+                recommendationGenreScores.set(genreId, {
+                    id: genreId,
+                    name: genreNameMap.get(genreId) || `Genre ${genreId}`,
+                    count: 1,
+                    rankScore: rankedItems.length - index
+                });
+            }
+        }
     });
 
-    // Sort genres by preference score (how often they appear in user's collections)
-    const sortedGenres = Array.from(genreScores.values())
-        .sort((a, b) => b.count - a.count);
+    const sourceSortedGenres = Array.from(sourceGenreScores.values())
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    const sourceGenreIds = new Set(sourceSortedGenres.map((genre) => genre.id));
+    const recommendationSortedGenres = Array.from(recommendationGenreScores.values())
+        .filter((genre) => !sourceGenreIds.has(genre.id))
+        .sort((a, b) => b.count - a.count || b.rankScore - a.rankScore || a.name.localeCompare(b.name));
+
+    const sortedGenres: Genre[] = [
+        ...sourceSortedGenres.map((genre) => ({ id: genre.id, name: genre.name })),
+        ...recommendationSortedGenres.map((genre) => ({ id: genre.id, name: genre.name }))
+    ];
 
     if (sortedGenres.length === 0) {
-        return { ...emptyResult, sourceCollections, totalSourceItems: sourceMovies.length };
+        return {
+            ...emptyResult,
+            sourceCollections,
+            totalSourceItems
+        };
     }
 
-    // Group recommendations by genre, deduplicating across categories
-    // Each movie only appears in the first (highest-priority) category it matches
     const categories: CategoryRecommendation[] = [];
-    const usedMovieIds = new Set<number>();
+    const usedItemKeys = new Set<string>();
 
     for (const genre of sortedGenres) {
-        // Filter recommendations that have this genre and haven't been used yet
-        const genreRecommendations = Array.from(allRecommendations.values())
-            .filter(rec => rec.item.genre_ids?.includes(genre.id) && !usedMovieIds.has(rec.item.id))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit)
-            .map(rec => rec.item);
+        const genreRecommendations: TMDBMovie[] = [];
 
-        // Mark these movies as used
-        for (const movie of genreRecommendations) {
-            usedMovieIds.add(movie.id);
+        for (const item of rankedItems) {
+            if (!item.genre_ids?.includes(genre.id)) {
+                continue;
+            }
+
+            const key = getCandidateKey({ item, score: 0, sources: 0 });
+            if (usedItemKeys.has(key)) {
+                continue;
+            }
+
+            genreRecommendations.push(item);
+            if (genreRecommendations.length >= normalizedLimit) {
+                break;
+            }
+        }
+
+        for (const item of genreRecommendations) {
+            usedItemKeys.add(getCandidateKey({ item, score: 0, sources: 0 }));
         }
 
         if (genreRecommendations.length > 0) {
             categories.push({
-                genre: { id: genre.id, name: genre.name },
+                genre,
                 results: genreRecommendations,
                 total_results: genreRecommendations.length
             });
@@ -2777,7 +2757,7 @@ export async function generateCategoryRecommendations(
         categories,
         mediaType,
         sourceCollections,
-        totalSourceItems: sourceMovies.length
+        totalSourceItems
     };
 }
 
