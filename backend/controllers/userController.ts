@@ -15,7 +15,7 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
 
     try {
         const result = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label, show_movie_card_info
             FROM "user"
             WHERE id = ${req.userId}
         `;
@@ -31,6 +31,7 @@ export const getUserPreferences = async (req: Request, res: Response, next: Next
             category_recommendations_enabled: user.category_recommendations_enabled ?? false,
             show_adult_items: user.show_adult_items ?? false,
             show_reddit_label: user.show_reddit_label ?? true,
+            show_movie_card_info: user.show_movie_card_info ?? false,
         };
 
         res.status(200).json({ preferences });
@@ -51,6 +52,7 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         category_recommendations_enabled,
         show_adult_items,
         show_reddit_label,
+        show_movie_card_info,
     } = req.body as UpdateUserPreferencesInput;
 
     try {
@@ -77,14 +79,15 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const hasCategoryRecommendations = category_recommendations_enabled !== undefined;
         const hasShowAdultItems = show_adult_items !== undefined;
         const hasShowRedditLabel = show_reddit_label !== undefined;
+        const hasShowMovieCardInfo = show_movie_card_info !== undefined;
 
-        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations && !hasShowAdultItems && !hasShowRedditLabel) {
+        if (!hasRecommendationsEnabled && !hasCollectionId && !hasCategoryRecommendations && !hasShowAdultItems && !hasShowRedditLabel && !hasShowMovieCardInfo) {
             return res.status(400).json({ message: "No valid fields to update" });
         }
 
         // Get current values first
         const currentResult = await sql`
-            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
+            SELECT recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label, show_movie_card_info
             FROM "user"
             WHERE id = ${req.userId}
         `;
@@ -101,6 +104,7 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
         const newCategoryRecommendations = hasCategoryRecommendations ? category_recommendations_enabled : current.category_recommendations_enabled;
         const newShowAdultItems = hasShowAdultItems ? show_adult_items : current.show_adult_items;
         const newShowRedditLabel = hasShowRedditLabel ? show_reddit_label : current.show_reddit_label;
+        const newShowMovieCardInfo = hasShowMovieCardInfo ? show_movie_card_info : current.show_movie_card_info;
 
         // Update all fields
         const result = await sql`
@@ -110,9 +114,10 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
                 category_recommendations_enabled = ${newCategoryRecommendations},
                 show_adult_items = ${newShowAdultItems},
                 show_reddit_label = ${newShowRedditLabel},
+                show_movie_card_info = ${newShowMovieCardInfo},
                 updated_at = NOW()
             WHERE id = ${req.userId}
-            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label
+            RETURNING recommendations_enabled, recommendations_collection_id, category_recommendations_enabled, show_adult_items, show_reddit_label, show_movie_card_info
         `;
 
         if (result.length === 0) {
@@ -141,6 +146,7 @@ export const updateUserPreferences = async (req: Request, res: Response, next: N
             category_recommendations_enabled: updatedUser.category_recommendations_enabled ?? false,
             show_adult_items: updatedUser.show_adult_items ?? true,
             show_reddit_label: updatedUser.show_reddit_label ?? true,
+            show_movie_card_info: updatedUser.show_movie_card_info ?? false,
         };
 
         res.status(200).json({ preferences });

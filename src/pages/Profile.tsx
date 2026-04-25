@@ -268,6 +268,10 @@ const Profile = () => {
         );
     };
 
+    const handleToggleShowMovieCardInfo = (enabled: boolean) => {
+        updatePreferencesMutation.mutate({ show_movie_card_info: enabled });
+    };
+
     const handleCollectionToggle = (collectionId: string, isChecked: boolean) => {
         const currentIds = recommendationCollectionsData?.collections.map(c => c.id) || [];
         let newIds: string[];
@@ -387,6 +391,7 @@ const Profile = () => {
     const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
     const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
     const showAdultItems = preferencesData?.preferences?.show_adult_items ?? false;
+    const showMovieCardInfo = preferencesData?.preferences?.show_movie_card_info ?? false;
     const selectedCollectionIds = new Set(recommendationCollectionsData?.collections.map(c => c.id) || []);
     const isLoading = isLoadingCollections || isLoadingRecommendationCollections || isLoadingPreferences;
     const watchedItemsCount = watchedItemsData?.items.length ?? 0;
@@ -677,21 +682,42 @@ const Profile = () => {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="space-y-0.5">
-                                <Label htmlFor="show-adult-items-toggle" className="text-base">
-                                    Show adult items
-                                </Label>
-                                <p className="text-sm text-muted-foreground">
-                                    When off, TMDB-flagged adult titles are hidden from collections, recommendations, categories, and search.
-                                </p>
+                        <div className="space-y-6">
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <Label htmlFor="show-adult-items-toggle" className="text-base">
+                                        Show adult items
+                                    </Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When off, TMDB-flagged adult titles are hidden from collections, recommendations, categories, and search.
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="show-adult-items-toggle"
+                                    checked={showAdultItems}
+                                    onCheckedChange={handleToggleShowAdultItems}
+                                    disabled={isLoadingPreferences}
+                                />
                             </div>
-                            <Switch
-                                id="show-adult-items-toggle"
-                                checked={showAdultItems}
-                                onCheckedChange={handleToggleShowAdultItems}
-                                disabled={isLoadingPreferences}
-                            />
+
+                            <Separator />
+
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <Label htmlFor="show-movie-card-info-toggle" className="text-base">
+                                        Show info on cards
+                                    </Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When on, recommendation cards show title, year, rating, and occasional explainability text.
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="show-movie-card-info-toggle"
+                                    checked={showMovieCardInfo}
+                                    onCheckedChange={handleToggleShowMovieCardInfo}
+                                    disabled={isLoadingPreferences}
+                                />
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

@@ -31,6 +31,7 @@ export const user = pgTable("user", {
 	categoryRecommendationsEnabled: boolean("category_recommendations_enabled").default(true),
 	showAdultItems: boolean("show_adult_items").default(false).notNull(),
 	showRedditLabel: boolean("show_reddit_label").default(true).notNull(),
+	showMovieCardInfo: boolean("show_movie_card_info").default(false).notNull(),
 }, (table) => [
 	index("idx_user_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	unique("user_username_key").on(table.username),

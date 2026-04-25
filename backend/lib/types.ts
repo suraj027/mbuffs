@@ -10,6 +10,7 @@ export interface DatabaseUserAttributes {
     recommendations_enabled: boolean;
     recommendations_collection_id: string | null;
     show_reddit_label: boolean;
+    show_movie_card_info: boolean;
 }
 
 export interface AdminUserResponse {
@@ -43,6 +44,7 @@ export interface UserPreferences {
     category_recommendations_enabled: boolean;
     show_adult_items: boolean;
     show_reddit_label: boolean;
+    show_movie_card_info: boolean;
 }
 
 export interface UpdateUserPreferencesInput {
@@ -51,6 +53,7 @@ export interface UpdateUserPreferencesInput {
     category_recommendations_enabled?: boolean;
     show_adult_items?: boolean;
     show_reddit_label?: boolean;
+    show_movie_card_info?: boolean;
 }
 
 // --- Recommendation Types ---

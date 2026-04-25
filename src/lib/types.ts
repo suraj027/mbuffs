@@ -278,6 +278,7 @@ export interface UserPreferences {
   category_recommendations_enabled: boolean;
   show_adult_items: boolean;
   show_reddit_label: boolean;
+  show_movie_card_info: boolean;
 }
 
 export interface UpdateUserPreferencesInput {
@@ -286,6 +287,7 @@ export interface UpdateUserPreferencesInput {
   category_recommendations_enabled?: boolean;
   show_adult_items?: boolean;
   show_reddit_label?: boolean;
+  show_movie_card_info?: boolean;
 }
 
 // --- Recommendation Types ---

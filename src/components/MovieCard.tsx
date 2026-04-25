@@ -34,10 +34,10 @@ export function MovieCard({
   showNotInterested = false,
   additionalMenuItems
 }: MovieCardProps) {
-  const releaseYear = (movie.release_date || movie.first_air_date) 
-    ? new Date(movie.first_air_date || movie.release_date).getFullYear() 
+  const releaseYear = (movie.release_date || movie.first_air_date)
+    ? new Date(movie.first_air_date || movie.release_date).getFullYear()
     : "Unknown";
-  
+
   const mediaType = movie.first_air_date ? "tv" : "movie";
   const navLink = `/media/${mediaType}/${movie.id}`;
   const mediaId = mediaType === "tv" ? `${movie.id}tv` : String(movie.id);
@@ -58,9 +58,10 @@ export function MovieCard({
   const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
     queryKey: preferencesQueryKey,
     queryFn: fetchUserPreferencesApi,
-    enabled: isLoggedIn && user?.role === 'admin',
+    enabled: isLoggedIn,
     staleTime: 1000 * 60 * 5,
   });
+  const showMovieCardInfo = preferencesData?.preferences?.show_movie_card_info ?? false;
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
@@ -212,8 +213,12 @@ export function MovieCard({
             decoding="async"
           />
           
-          {/* Gradient overlay — always visible at bottom, intensifies on hover */}
-          <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-100 transition-opacity duration-300" />
+          {/* Gradient overlay */}
+          {showMovieCardInfo ? (
+            <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent opacity-100 transition-opacity duration-300" />
+          ) : (
+            <div className="absolute inset-0 bg-linear-to-t from-black/35 via-black/5 to-transparent" />
+          )}
 
           {/* Reddit Badge (admin-toggleable) */}
           {isRedditRecommended && user?.role === 'admin' && (preferencesData?.preferences?.show_reddit_label ?? true) && (
@@ -285,27 +290,29 @@ export function MovieCard({
             </div>
           )}
 
-          {/* Title Overlay */}
-          <div className="absolute bottom-0 left-0 right-0 p-3 flex flex-col justify-end z-10">
-            <h3 className="font-semibold text-xs sm:text-sm leading-tight text-foreground line-clamp-2 drop-shadow-md shadow-black">
-              {movie.name || movie.title}
-            </h3>
-            <div className="flex items-center gap-1.5 mt-1">
-              <p className="text-[10px] text-foreground/70 font-medium">{releaseYear}</p>
-              <span className="text-[10px] text-foreground/40">•</span>
-              <div className="flex items-center gap-1">
-                <Star className="h-3 w-3 text-yellow-400" fill="currentColor" />
-                <span className="text-[10px] font-medium text-foreground/90">
-                  {movie.vote_average.toFixed(1)}
-                </span>
+          {showMovieCardInfo && (
+            <div className="absolute bottom-0 left-0 right-0 p-3 flex flex-col justify-end z-10">
+              <h3 className="font-semibold text-xs sm:text-sm leading-tight text-foreground line-clamp-2 drop-shadow-md shadow-black">
+                {movie.name || movie.title}
+              </h3>
+              <div className="flex items-center gap-1.5 mt-1">
+                <p className="text-[10px] text-foreground/70 font-medium">{releaseYear}</p>
+                <span className="text-[10px] text-foreground/40">•</span>
+                <div className="flex items-center gap-1">
+                  <Star className="h-3 w-3 text-yellow-400" fill="currentColor" />
+                  <span className="text-[10px] font-medium text-foreground/90">
+                    {movie.vote_average.toFixed(1)}
+                  </span>
+                </div>
               </div>
+              {shouldShowBecauseYouLiked && (
+                <p className="mt-1 text-[10px] text-foreground/80 line-clamp-1">
+                  Because you liked {becauseYouLiked}
+                </p>
+              )}
             </div>
-            {shouldShowBecauseYouLiked && (
-              <p className="mt-1 text-[10px] text-foreground/80 line-clamp-1">
-                Because you liked {becauseYouLiked}
-              </p>
-            )}
-          </div>
+          )}
+
         </div>
       </div>
     </Link>
