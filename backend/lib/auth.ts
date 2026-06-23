@@ -18,6 +18,11 @@ if (!databaseUrl) {
 const sqlQuery = neon(databaseUrl);
 const db = drizzle(sqlQuery);
 
+// Use secure, cross-site cookies only when served over HTTPS (production / ngrok).
+// Over plain http://localhost, "secure" cookies are dropped by Safari (and "none"
+// requires "secure"), which breaks the OAuth state cookie -> state_mismatch.
+const useSecureCookies = (process.env.BETTER_AUTH_URL || "").startsWith("https://");
+
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
         provider: "pg",
@@ -69,10 +74,12 @@ export const auth = betterAuth({
         // when the PWA is closed and reopened.
         // In development (HTTP) we fall back to "lax" because "none" requires HTTPS.
         defaultCookieAttributes: {
-            // Force sameSite: "none" and secure: true for local network/ngrok testing
-            // because the frontend (nip.io) and backend (ngrok) are cross-origin.
-            sameSite: "none" as const,
-            secure: true,
+            // Cross-site cookies (sameSite "none" + secure) for local network/ngrok
+            // testing where frontend (nip.io) and backend (ngrok) are cross-origin.
+            // Falls back to "lax"/insecure over plain http://localhost so Safari will
+            // actually persist the OAuth state cookie.
+            sameSite: useSecureCookies ? ("none" as const) : ("lax" as const),
+            secure: useSecureCookies,
             // Explicit maxAge prevents iOS from treating these as session-only cookies
             // that get wiped when it kills the PWA's WKWebView process.
             maxAge: 60 * 60 * 24 * 7, // 7 days — matches session.expiresIn
