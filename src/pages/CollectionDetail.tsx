@@ -10,9 +10,11 @@ import {
     addCollaboratorApi,
     updateCollaboratorApi,
     removeCollaboratorApi,
-    fetchTvDetailsApi
+    fetchTvDetailsApi,
+    fetchRecommendationCollectionsApi,
+    fetchUserPreferencesApi
 } from '@/lib/api';
-import { CollectionDetails, MovieDetails, CollectionCollaborator, CollectionMovieEntry, AddCollaboratorInput, UpdateCollaboratorInput, SearchResults, AddMovieInput, AddMovieResponse, BulkOperationResponse } from '@/lib/types';
+import { CollectionDetails, MovieDetails, CollectionCollaborator, CollectionMovieEntry, AddCollaboratorInput, UpdateCollaboratorInput, SearchResults, AddMovieInput, AddMovieResponse, BulkOperationResponse, RecommendationCollectionsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +41,10 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BulkActionBar } from '@/components/collection/BulkActionBar';
 import { CollectionPickerDialog } from '@/components/collection/CollectionPickerDialog';
+import { useWarmRecommendations } from '@/App';
+import { getPreferencesQueryKey } from '@/lib/recommendationQueries';
+
+const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
 
 const frontendAddCollaboratorSchema = z.object({
     email: z.string().email("Invalid email address"),
@@ -76,6 +82,8 @@ const CollectionDetail = () => {
 
     const collectionQueryKey = ['collection', collectionId];
 
+    const { warmRecommendations } = useWarmRecommendations();
+
     const {
         data: collectionDetails,
         isLoading: isLoadingCollection,
@@ -86,6 +94,36 @@ const CollectionDetail = () => {
         queryFn: () => fetchCollectionDetailsApi(collectionId!),
         enabled: !!collectionId,
     });
+
+    const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
+        queryKey: getPreferencesQueryKey(currentUser?.id),
+        queryFn: fetchUserPreferencesApi,
+        enabled: isLoggedIn,
+        staleTime: 1000 * 60 * 5,
+    });
+    const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
+
+    // Warm the server recommendation cache only when an edited collection is
+    // one of the user's selected recommendation sources. Mirrors the gate on
+    // the Movie page so unrelated collection edits don't trigger a warm. The
+    // source list is read per-user, so collections shared with (and selected
+    // by) a collaborator are still covered.
+    const warmRecommendationsIfSource = useCallback(async (changedCollectionIds: (string | undefined)[]) => {
+        if (!recommendationsEnabled) return;
+        const ids = changedCollectionIds.filter((id): id is string => Boolean(id));
+        if (ids.length === 0) return;
+
+        const recommendationCollections = await queryClient.fetchQuery<RecommendationCollectionsResponse>({
+            queryKey: RECOMMENDATION_COLLECTIONS_QUERY_KEY,
+            queryFn: fetchRecommendationCollectionsApi,
+            staleTime: 1000 * 60 * 5,
+        }).catch(() => null);
+
+        const changedSource = recommendationCollections?.collections.some(({ id }) => ids.includes(id));
+        if (changedSource) {
+            warmRecommendations();
+        }
+    }, [recommendationsEnabled, queryClient, warmRecommendations]);
 
     const movieIds = collectionDetails?.movies.map(m => m.movie_id) ?? [];
     const {
@@ -190,10 +228,11 @@ const CollectionDetail = () => {
     // Mutations
     const removeMovieMutation = useMutation<void, Error, { collectionId: string; movieId: number | string }>({
         mutationFn: ({ collectionId, movieId }) => removeMovieFromCollectionApi(collectionId, movieId),
-        onSuccess: (_, { movieId }) => {
+        onSuccess: (_, { collectionId: changedCollectionId, movieId }) => {
             toast.success("Removed from collection.");
             queryClient.invalidateQueries({ queryKey: collectionQueryKey });
             queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', String(movieId)] });
+            void warmRecommendationsIfSource([changedCollectionId]);
         },
         onError: (error) => { toast.error(`Failed to remove: ${error.message}`); }
     });
@@ -268,6 +307,8 @@ const CollectionDetail = () => {
             variables.movieIds.forEach((id) => {
                 queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', id] });
             });
+
+            void warmRecommendationsIfSource([variables.sourceCollectionId, variables.targetCollectionId]);
 
             setPickerState(null);
             exitSelectMode();
@@ -392,6 +433,7 @@ const CollectionDetail = () => {
         onSuccess: (data, variables) => {
             toast.success(`Added to collection.`);
             queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', String(variables.data.movieId)] });
+            void warmRecommendationsIfSource([variables.collectionId]);
         },
         onError: (error, _variables, context) => {
             if (context?.didOptimisticUpdate && context.optimisticMovieId) {
