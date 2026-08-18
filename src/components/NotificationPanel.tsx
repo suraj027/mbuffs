@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Bell, CheckCheck, Trash2, Loader2 } from 'lucide-react';
@@ -95,7 +94,7 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
         </div>
       </div>
 
-      <ScrollArea className="max-h-[60vh]">
+      <div className="custom-scrollbar max-h-[60vh] overflow-y-auto overscroll-contain">
         <div className="py-1">
           {isLoading && (
             <div className="space-y-1 px-3">
@@ -126,7 +125,7 @@ export const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
             />
           ))}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };

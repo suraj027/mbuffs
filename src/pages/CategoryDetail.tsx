@@ -1,223 +1,29 @@
 import { useParams, Link } from "react-router-dom";
-import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useCallback, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
-import { MovieCard } from "@/components/MovieCard";
-import { 
-  fetchCategoryRecommendationsApi,
-  fetchGenreListApi, 
-  fetchMoviesByGenreApi, 
-  fetchTvByGenreApi, 
-  fetchNowPlayingMoviesApi,
-  fetchUserPreferencesApi,
-  fetchUserRegion,
-} from "@/lib/api";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CategoryGrid } from "@/components/CategoryGrid";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, Sparkles } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
-import { useWatchedStatus } from "@/hooks/useWatchedStatus";
-import { useNotInterestedStatus } from "@/hooks/useNotInterestedStatus";
-import { CategoryRecommendationsResponse, UserPreferences } from "@/lib/types";
-import {
-  CATEGORY_OVERVIEW_FETCH_LIMIT,
-  dedupeRecommendations,
-  excludeFeedbackRecommendations,
-  getCategoryRecommendationsOverviewQueryKey,
-  getPreferencesQueryKey,
-  getRecommendationMediaId,
-  getSharedPersonalizedGenreInfiniteQueryOptions,
-  getSharedPersonalizedTheatricalInfiniteQueryOptions,
-  mergePreviewWithPagedRecommendations,
-} from "@/lib/recommendationQueries";
+import { useCategoryItems } from "@/hooks/useCategoryItems";
 
 const CategoryDetail = () => {
-  const { mediaType, genreId } = useParams<{ mediaType: 'movie' | 'tv'; genreId: string }>();
-  const genreIdNum = genreId === 'now-playing' ? 0 : parseInt(genreId || '0', 10);
-  const isTheatrical = genreId === 'now-playing';
-  const { user } = useAuth();
+  const { mediaType, genreId } = useParams<{ mediaType: "movie" | "tv"; genreId: string }>();
 
-  // Fetch user preferences to check if personalization is enabled
-  const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
-    queryKey: getPreferencesQueryKey(user?.id),
-    queryFn: fetchUserPreferencesApi,
-    enabled: !!user,
-    staleTime: 1000 * 60 * 5,
-  });
-
-  const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
-  const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
-  const showPersonalized = Boolean(user && categoryRecommendationsEnabled && recommendationsEnabled);
-  const showNotInterested = recommendationsEnabled && categoryRecommendationsEnabled;
-
-  const { data: userRegion } = useQuery({
-    queryKey: ['userRegion'],
-    queryFn: fetchUserRegion,
-    staleTime: Infinity,
-  });
-
-  // Fetch genre name
-  const { data: genreData } = useQuery({
-    queryKey: ['genres', mediaType],
-    queryFn: () => fetchGenreListApi(mediaType as 'movie' | 'tv'),
-    staleTime: 1000 * 60 * 60, // Cache for 1 hour
-    enabled: !!mediaType && !isTheatrical,
-  });
-
-  const genreName = isTheatrical
-    ? "Theatrical Releases"
-    : (genreData?.genres.find(g => g.id === genreIdNum)?.name || 'Category');
-
-  const { data: categoryOverviewData, isLoading: isLoadingCategoryOverview } = useQuery<CategoryRecommendationsResponse>({
-    queryKey: getCategoryRecommendationsOverviewQueryKey(user?.id, mediaType as 'movie' | 'tv', CATEGORY_OVERVIEW_FETCH_LIMIT),
-    queryFn: () => fetchCategoryRecommendationsApi(mediaType as 'movie' | 'tv', CATEGORY_OVERVIEW_FETCH_LIMIT),
-    staleTime: 1000 * 60 * 10,
-    enabled: showPersonalized && !!user?.id && !!mediaType && !isTheatrical,
-  });
-
-  // Infinite query for personalized recommendations
   const {
-    data: personalizedData,
-    isLoading: isLoadingPersonalized,
-    isFetchingNextPage: isFetchingNextPagePersonalized,
-    hasNextPage: hasNextPagePersonalized,
-    fetchNextPage: fetchNextPagePersonalized,
-  } = useInfiniteQuery({
-    ...(isTheatrical
-      ? getSharedPersonalizedTheatricalInfiniteQueryOptions(user?.id, userRegion)
-      : getSharedPersonalizedGenreInfiniteQueryOptions(user?.id, mediaType as 'movie' | 'tv', genreIdNum)),
-    enabled: showPersonalized && !!mediaType && (!!genreIdNum || isTheatrical),
-  });
-
-  // Infinite query for default (non-personalized) results
-  const {
-    data: defaultData,
-    isLoading: isLoadingDefault,
-    isFetchingNextPage: isFetchingNextPageDefault,
-    hasNextPage: hasNextPageDefault,
-    fetchNextPage: fetchNextPageDefault,
-  } = useInfiniteQuery({
-    queryKey: isTheatrical
-      ? ['movies', 'now_playing', userRegion ?? null, 'all']
-      : ['genre', mediaType, genreIdNum, 'all'],
-    queryFn: ({ pageParam = 1 }) => {
-      if (isTheatrical) {
-        return fetchNowPlayingMoviesApi(pageParam, userRegion);
-      }
-      return mediaType === 'movie'
-        ? fetchMoviesByGenreApi(genreIdNum, pageParam)
-        : fetchTvByGenreApi(genreIdNum, pageParam);
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => {
-      if (lastPage.page < lastPage.total_pages) {
-        return lastPage.page + 1;
-      }
-      return undefined;
-    },
-    staleTime: 1000 * 60 * 10,
-    enabled: !showPersonalized && !!mediaType && (!!genreIdNum || isTheatrical),
-  });
-
-  // Use personalized data if available, otherwise default
-  const data = showPersonalized ? personalizedData : defaultData;
-  const isFetchingNextPage = showPersonalized ? isFetchingNextPagePersonalized : isFetchingNextPageDefault;
-  const hasNextPage = showPersonalized ? hasNextPagePersonalized : hasNextPageDefault;
-  const fetchNextPage = showPersonalized ? fetchNextPagePersonalized : fetchNextPageDefault;
-
-  const personalizedSeedResults = useMemo(() => {
-    if (!showPersonalized || isTheatrical) {
-      return [];
-    }
-
-    return categoryOverviewData?.categories.find((category) => category.genre.id === genreIdNum)?.results ?? [];
-  }, [showPersonalized, isTheatrical, categoryOverviewData, genreIdNum]);
-
-  const hasPagedData = (data?.pages?.length ?? 0) > 0;
-  const hasSeedData = showPersonalized && !isTheatrical && personalizedSeedResults.length > 0;
-  const isInitialPagedLoad = showPersonalized && !hasPagedData && isLoadingPersonalized;
-
-  const isLoading = showPersonalized
-    ? !hasPagedData && !hasSeedData && (isLoadingPersonalized || (!isTheatrical && isLoadingCategoryOverview))
-    : isLoadingDefault;
-
-  // Deduplicate movies by ID
-  const allMovies = useMemo(
-    () => {
-      const pagedResults = data?.pages.flatMap((page) => page.results) ?? [];
-
-      if (showPersonalized && !isTheatrical && personalizedSeedResults.length > 0) {
-        return mergePreviewWithPagedRecommendations(personalizedSeedResults, pagedResults);
-      }
-
-      return dedupeRecommendations(pagedResults);
-    },
-    [data, showPersonalized, isTheatrical, personalizedSeedResults],
-  );
-  const totalResults = showPersonalized
-    ? (personalizedData?.pages[0]?.total_results || personalizedSeedResults.length)
-    : (defaultData?.pages[0]?.total_results || 0);
-
-  // Get source info for personalized results
-  const sourceCollections = showPersonalized
-    ? (personalizedData?.pages[0]?.sourceCollections || categoryOverviewData?.sourceCollections || [])
-    : [];
-  const totalSourceItems = showPersonalized
-    ? (personalizedData?.pages[0]?.totalSourceItems || categoryOverviewData?.totalSourceItems || 0)
-    : 0;
-
-  // Generate media IDs for watched status lookup
-  const mediaIds = useMemo(
-    () => allMovies.map((movie) => getRecommendationMediaId(movie, mediaType as 'movie' | 'tv')),
-    [allMovies, mediaType]
-  );
-
-  const { watchedMap, isLoading: isLoadingWatched } = useWatchedStatus(mediaIds);
-  const { notInterestedMap, isLoading: isLoadingNotInterested } = useNotInterestedStatus(showNotInterested ? mediaIds : []);
-  const isFeedbackStatusLoading = showPersonalized && (isLoadingWatched || isLoadingNotInterested);
-  const visibleMovies = useMemo(
-    () => showPersonalized
-      ? excludeFeedbackRecommendations(
-          allMovies,
-          watchedMap,
-          showNotInterested ? notInterestedMap : {},
-          mediaType as 'movie' | 'tv',
-        ).filter((movie) => movie.poster_path)
-      : allMovies,
-    [allMovies, watchedMap, notInterestedMap, showPersonalized, showNotInterested, mediaType]
-  );
-
-  // Infinite scroll with Intersection Observer
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
-    if (isFetchingNextPage) return;
-    
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-    
-    observerRef.current = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && hasNextPage) {
-        fetchNextPage();
-      }
-    }, {
-      rootMargin: '200px',
-    });
-    
-    if (node) {
-      observerRef.current.observe(node);
-    }
-  }, [isFetchingNextPage, hasNextPage, fetchNextPage]);
-
-  // Cleanup observer on unmount
-  useEffect(() => {
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-      }
-    };
-  }, []);
+    genreName,
+    showPersonalized,
+    showNotInterested,
+    visibleMovies,
+    watchedMap,
+    notInterestedMap,
+    totalResults,
+    sourceCollections,
+    totalSourceItems,
+    isLoading,
+    isFetchingNextPage,
+    isInitialPagedLoad,
+    loadMoreRef,
+  } = useCategoryItems({ mediaType: (mediaType as "movie" | "tv") ?? "movie", genreId });
 
   return (
     <>
@@ -234,10 +40,7 @@ const CategoryDetail = () => {
           </Link>
 
           <div className="flex items-center gap-3 mb-2">
-            <div className="h-8 w-1 rounded-full bg-primary" />
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-              {genreName}
-            </h1>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{genreName}</h1>
             {showPersonalized && (
               <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 gap-1">
                 <Sparkles className="h-3 w-3" />
@@ -246,63 +49,37 @@ const CategoryDetail = () => {
             )}
           </div>
           <p className="text-muted-foreground">
-            {mediaType === 'movie' ? 'Movies' : 'TV Shows'}
+            {mediaType === "movie" ? "Movies" : "TV Shows"}
             {totalResults > 0 && ` (${totalResults.toLocaleString()} results)`}
           </p>
           {showPersonalized && sourceCollections.length > 0 && (
             <p className="text-sm text-muted-foreground mt-1">
-              Based on {totalSourceItems} items from {sourceCollections.length} collection{sourceCollections.length !== 1 ? 's' : ''}
+              Based on {totalSourceItems} items from {sourceCollections.length} collection
+              {sourceCollections.length !== 1 ? "s" : ""}
             </p>
           )}
         </section>
 
         {/* Grid */}
-        {(isLoading || isFeedbackStatusLoading) ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-            {Array.from({ length: 18 }).map((_, index) => (
-              <div key={index} className="space-y-3">
-                <Skeleton className="aspect-2/3 w-full rounded-xl" />
-                <Skeleton className="h-4 w-[75%] rounded-md" />
-                <Skeleton className="h-3 w-[45%] rounded-md" />
-              </div>
-            ))}
-          </div>
-        ) : visibleMovies.length > 0 ? (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5">
-              {visibleMovies.map((movie, index) => {
-                const mediaId = getRecommendationMediaId(movie, mediaType as 'movie' | 'tv');
-                return (
-                  <MovieCard
-                    key={`${movie.id}-${index}`}
-                    movie={movie}
-                    isWatched={watchedMap[mediaId] ?? false}
-                    isNotInterested={notInterestedMap[mediaId] ?? false}
-                    showNotInterested={showNotInterested}
-                  />
-                );
-              })}
-              {/* Skeleton loaders for infinite scroll - inside the same grid */}
-              {(isFetchingNextPage || isInitialPagedLoad) && Array.from({ length: 6 }).map((_, index) => (
-                <div key={`skeleton-${index}`} className="space-y-3">
-                  <Skeleton className="aspect-[2/3] w-full rounded-xl" />
-                  <Skeleton className="h-4 w-[75%] rounded-md" />
-                  <Skeleton className="h-3 w-[45%] rounded-md" />
-                </div>
-              ))}
+        <CategoryGrid
+          movies={visibleMovies}
+          mediaType={(mediaType as "movie" | "tv") ?? "movie"}
+          watchedMap={watchedMap}
+          notInterestedMap={notInterestedMap}
+          showNotInterested={showNotInterested}
+          isLoading={isLoading}
+          isFetchingNextPage={isFetchingNextPage}
+          isInitialPagedLoad={isInitialPagedLoad}
+          loadMoreRef={loadMoreRef}
+          emptyState={
+            <div className="text-center py-16">
+              <p className="text-muted-foreground">No results found for this category.</p>
+              <Button asChild variant="outline" className="mt-4">
+                <Link to="/categories">Browse other categories</Link>
+              </Button>
             </div>
-
-            {/* Infinite scroll trigger */}
-            <div ref={loadMoreRef} />
-          </>
-        ) : (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground">No results found for this category.</p>
-            <Button asChild variant="outline" className="mt-4">
-              <Link to="/categories">Browse other categories</Link>
-            </Button>
-          </div>
-        )}
+          }
+        />
       </main>
     </>
   );

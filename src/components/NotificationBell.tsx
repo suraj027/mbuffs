@@ -15,8 +15,10 @@ export const NotificationBell = () => {
     queryKey: ['notifications', 'unread-count'],
     queryFn: fetchUnreadCountApi,
     enabled: isLoggedIn,
-    refetchInterval: 30_000,
-    staleTime: 10_000,
+    staleTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   const unreadCount = data?.count ?? 0;

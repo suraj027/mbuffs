@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchMovieDetailsApi, fetchTvDetailsApi, fetchVideosApi, fetchCreditsApi, fetchPersonCreditsApi, fetchStudioMoviesApi, fetchUserCollectionsApi, fetchCollectionDetailsApi, addMovieToCollectionApi, removeMovieFromCollectionApi, getImageUrl, fetchUserRegion, fetchTmdbCollectionDetailsApi, fetchCombinedRatingsApi, fetchOmdbRatingsApi, getWatchedStatusApi, toggleWatchedStatusApi, getNotInterestedStatusApi, toggleNotInterestedStatusApi, fetchUserPreferencesApi } from '@/lib/api';
-import { MovieDetails, Network, ProductionCompany, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse, OmdbRatingsResponse, UserPreferences, SearchResults } from '@/lib/types';
+import { fetchMovieDetailsApi, fetchTvDetailsApi, fetchVideosApi, fetchCreditsApi, fetchPersonCreditsApi, fetchStudioMoviesApi, fetchUserCollectionsApi, fetchRecommendationCollectionsApi, fetchCollectionDetailsApi, addMovieToCollectionApi, removeMovieFromCollectionApi, getImageUrl, fetchUserRegion, fetchTmdbCollectionDetailsApi, fetchCombinedRatingsApi, fetchOmdbRatingsApi, getWatchedStatusApi, toggleWatchedStatusApi, getNotInterestedStatusApi, toggleNotInterestedStatusApi, fetchUserPreferencesApi } from '@/lib/api';
+import { MovieDetails, Network, ProductionCompany, Video, CastMember, CrewMember, CollectionSummary, WatchProvider, PersonCreditsResponse, PersonCredit, VideosResponse, CreditsResponse, TmdbCollectionDetails, CombinedRatingsResponse, OmdbRatingsResponse, UserPreferences, SearchResults, RecommendationCollectionsResponse } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -24,7 +24,7 @@ import {
 import { useWarmRecommendations } from '@/App';
 import { toast } from 'sonner';
 import { ReviewSection, getRatingTier, StarDisplay, InteractiveStarRating } from '@/components/reviews/ReviewSection';
-import { fetchReviewSummaryApi, upsertRatingApi } from '@/lib/api';
+import { deleteRatingApi, fetchReviewSummaryApi, upsertRatingApi } from '@/lib/api';
 import type { ReviewSummaryResponse } from '@/lib/types';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,7 @@ import { useOmdbRatings, enrichMoviesWithImdbRatings } from '@/hooks/useOmdbRati
 
 const TMDB_LOGO_BASE = 'https://image.tmdb.org/t/p/w92';
 const PROVIDER_PREVIEW_COUNT = 3;
+const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
 
 function ProviderStack({ title, logos }: { title: string, logos: { id: number | string; src: string; alt: string; isStudio?: boolean }[] }) {
     if (logos.length === 0) return null;
@@ -314,15 +315,25 @@ const MovieDetail = () => {
     });
 
     const rateMutation = useMutation({
-        mutationFn: (rating: number) => upsertRatingApi(mediaType as 'movie' | 'tv', Number(mediaId), rating),
+        mutationFn: (rating: number | null) => rating === null
+            ? deleteRatingApi(mediaType as 'movie' | 'tv', Number(mediaId))
+            : upsertRatingApi(mediaType as 'movie' | 'tv', Number(mediaId), rating),
         onMutate: async (nextRating) => {
             await queryClient.cancelQueries({ queryKey: reviewSummaryQueryKey });
             const prev = queryClient.getQueryData<ReviewSummaryResponse>(reviewSummaryQueryKey);
             if (!prev) return { prev };
             const prevCount = prev.summary.ratingsCount;
             const prevAvg = prev.summary.averageRating ?? 0;
-            const nextCount = prev.userRating == null ? prevCount + 1 : prevCount;
-            const total = prev.userRating == null ? prevAvg * prevCount + nextRating : prevAvg * prevCount - prev.userRating + nextRating;
+            const nextCount = nextRating === null
+                ? Math.max(0, prevCount - (prev.userRating == null ? 0 : 1))
+                : prev.userRating == null
+                    ? prevCount + 1
+                    : prevCount;
+            const total = nextRating === null
+                ? prevAvg * prevCount - (prev.userRating ?? 0)
+                : prev.userRating == null
+                    ? prevAvg * prevCount + nextRating
+                    : prevAvg * prevCount - prev.userRating + nextRating;
             queryClient.setQueryData<ReviewSummaryResponse>(reviewSummaryQueryKey, {
                 ...prev,
                 userRating: nextRating,
@@ -396,6 +407,7 @@ const MovieDetail = () => {
         originalMovieStatusRef.current = null;
 
         const tasks: Promise<void>[] = [];
+        const successfulCollectionIds = new Set<string>();
 
         for (const [collectionId, operation] of ops.entries()) {
             // Skip no-ops: if the server already has this state, don't write.
@@ -406,8 +418,9 @@ const MovieDetail = () => {
 
             if (operation === 'add') {
                 tasks.push(
-                    addMovieToCollectionApi(collectionId, { movieId: collectionMediaId as unknown as number })
+                    addMovieToCollectionApi(collectionId, { movieId: collectionMediaId as unknown as number, title: isMovie ? (mediaDetails as MovieDetails)?.title : (mediaDetails as MovieDetails)?.name, posterPath: mediaDetails?.poster_path ?? null, mediaType })
                         .then(() => {
+                            successfulCollectionIds.add(collectionId);
                             queryClient.invalidateQueries({ queryKey: ['collection', collectionId] });
                         })
                         .catch((error: Error & { data?: { message?: string } }) => {
@@ -426,6 +439,7 @@ const MovieDetail = () => {
                 tasks.push(
                     removeMovieFromCollectionApi(collectionId, collectionMediaId!)
                         .then(() => {
+                            successfulCollectionIds.add(collectionId);
                             queryClient.invalidateQueries({ queryKey: ['collection', collectionId] });
                         })
                         .catch(() => {
@@ -440,7 +454,22 @@ const MovieDetail = () => {
         }
 
         await Promise.allSettled(tasks);
-        warmRecommendations();
+
+        if (successfulCollectionIds.size > 0 && recommendationsEnabled) {
+            const recommendationCollections = await queryClient.fetchQuery<RecommendationCollectionsResponse>({
+                queryKey: RECOMMENDATION_COLLECTIONS_QUERY_KEY,
+                queryFn: fetchRecommendationCollectionsApi,
+                staleTime: 1000 * 60 * 5,
+            }).catch(() => null);
+
+            const changedRecommendationSource = recommendationCollections?.collections.some(({ id }) =>
+                successfulCollectionIds.has(id)
+            );
+
+            if (changedRecommendationSource) {
+                warmRecommendations();
+            }
+        }
     };
 
     const handleCollectionToggle = (collectionId: string, isCurrentlyInCollection: boolean) => {

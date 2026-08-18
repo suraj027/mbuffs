@@ -26,12 +26,20 @@ export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;
 
 export const addMovieSchema = z.object({
   movieId: z.string({ message: "Movie ID is required and must be a number or a string." }).or(z.number({ message: "Movie ID is required and must be a number or a string." })),
-  // Optional: could include title/poster directly if desired
-  // title: z.string().optional(),
-  // posterPath: z.string().optional(),
+  title: z.string().max(500).optional(),
+  posterPath: z.string().nullable().optional(),
+  mediaType: z.enum(['movie', 'tv']).optional(),
 });
 
 export type AddMovieInput = z.infer<typeof addMovieSchema>;
+
+export const bulkOperationSchema = z.object({
+  action: z.enum(['copy', 'move', 'remove']),
+  movieIds: z.array(z.string().min(1)).min(1, 'At least one item is required').max(500, 'Cannot process more than 500 items at once'),
+  targetCollectionId: z.string().min(1, 'Target collection ID is required').optional(),
+});
+
+export type BulkOperationInput = z.infer<typeof bulkOperationSchema>;
 
 export const addCollaboratorSchema = z.object({
   email: z.string().email("Invalid email address"),

@@ -4,9 +4,6 @@ node_modules/
 # Build Output
 dist/
 
-# Cache files
-data/reddit/cache.json
-
 # Environment Variables File
 .env
 

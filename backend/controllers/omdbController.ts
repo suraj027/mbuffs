@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { fetchAndSaveOmdbRatings, getImdbRatingsBatch } from '../services/omdbService.js';
+import { fetchAndSaveOmdbRatings, getImdbRatingsBatch, getOmdbRatingsFromDb } from '../services/omdbService.js';
 
 export const getOmdbRatings = async (req: Request, res: Response, next: NextFunction) => {
     const { tmdbId, mediaType } = req.params;
@@ -15,7 +15,20 @@ export const getOmdbRatings = async (req: Request, res: Response, next: NextFunc
     }
 
     try {
-        const data = await fetchAndSaveOmdbRatings(tmdbId, mediaType as 'movie' | 'tv');
+        // Anonymous callers are served from the DB cache only. Fetching fresh
+        // ratings from the OMDB API (and the INSERT that persists them) is
+        // reserved for authenticated users — this endpoint is public, so
+        // otherwise bots/crawlers can force unbounded writes + OMDB API usage
+        // by enumerating TMDB IDs. Matches the batch endpoint's DB-only design.
+        const data = req.userId
+            ? await fetchAndSaveOmdbRatings(tmdbId, mediaType as 'movie' | 'tv')
+            : await getOmdbRatingsFromDb(tmdbId, mediaType as 'movie' | 'tv');
+
+        // Ratings are global (not user-specific) and change ~daily. Let Vercel's
+        // edge cache serve repeat hits so crawlers/bots don't wake the backend
+        // (and the DB) for the same title over and over. 404s cache too, which
+        // absorbs repeat probes for titles that have no ratings.
+        res.set('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate');
 
         if (!data) {
             res.status(404).json({

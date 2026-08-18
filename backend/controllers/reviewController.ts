@@ -462,6 +462,32 @@ export const upsertRating = async (req: Request, res: Response, next: NextFuncti
     }
 };
 
+export const deleteRating = async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.userId) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    try {
+        const paramsParsed = mediaIdentityParamsSchema.safeParse(req.params);
+        if (!paramsParsed.success) {
+            return res.status(400).json({ message: 'Validation failed', errors: paramsParsed.error.issues });
+        }
+
+        const { mediaType, tmdbId } = paramsParsed.data;
+        await sql`
+            DELETE FROM media_ratings
+            WHERE user_id = ${req.userId}
+              AND media_type = ${mediaType}
+              AND tmdb_id = ${tmdbId}
+        `;
+
+        const summary = await buildSummary(mediaType, tmdbId, req.userId);
+        res.status(200).json({ summary });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userId) {
         return res.status(401).json({ message: 'Unauthorized' });

@@ -7,6 +7,7 @@ import {
     deleteCollection,
     addMovieToCollection,
     removeMovieFromCollection,
+    bulkItemAction,
      addCollaborator,
      updateCollaboratorPermission,
     removeCollaborator,
@@ -60,6 +61,12 @@ router.delete(
     requireAuth as RequestHandler,
     requireCollectionPermission('edit') as RequestHandler,
     removeMovieFromCollection as RequestHandler
+);
+
+router.post(
+    '/:collectionId/movies/bulk',
+    requireAuth as RequestHandler,
+    bulkItemAction as RequestHandler
 );
 
 router.post(

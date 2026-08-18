@@ -4,7 +4,7 @@ import {
     HomepageCollageItem, HomepageCollageItemsResponse, HomepageCollageItemsPublicResponse,
     CollectionSummary, CollectionDetails, CollectionCollaborator, UserCollectionsResponse,
     CreateCollectionInput, UpdateCollectionInput, AddMovieInput, AddCollaboratorInput,
-    UpdateCollaboratorInput, AddMovieResponse, VideosResponse, CreditsResponse,
+    UpdateCollaboratorInput, AddMovieResponse, BulkOperationInput, BulkOperationResponse, VideosResponse, CreditsResponse,
     Genre, GenreListResponse, PersonCreditsResponse, SeasonDetails, TmdbCollectionDetails,
     UserPreferences, UpdateUserPreferencesInput,
     RecommendationsResponse, RecommendationCollectionsResponse, CategoryRecommendationsResponse,
@@ -306,6 +306,13 @@ export const addMovieToCollectionApi = async (collectionId: string, data: AddMov
 
 export const removeMovieFromCollectionApi = async (collectionId: string, movieId: number | string): Promise<void> => {
     await fetchBackend(`/collections/${collectionId}/movies/${movieId}`, { method: 'DELETE' });
+};
+
+export const bulkItemActionApi = async (sourceCollectionId: string, data: BulkOperationInput): Promise<BulkOperationResponse> => {
+    return fetchBackend(`/collections/${sourceCollectionId}/movies/bulk`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
 };
 
 // --- Collection Collaborators API (No changes needed) ---
@@ -1020,6 +1027,15 @@ export const upsertRatingApi = async (
     return fetchBackend(`/reviews/${mediaType}/${tmdbId}/rating`, {
         method: 'PUT',
         body: JSON.stringify({ rating }),
+    });
+};
+
+export const deleteRatingApi = async (
+    mediaType: 'movie' | 'tv',
+    tmdbId: number
+): Promise<{ summary: ReviewSummaryResponse }> => {
+    return fetchBackend(`/reviews/${mediaType}/${tmdbId}/rating`, {
+        method: 'DELETE',
     });
 };
 

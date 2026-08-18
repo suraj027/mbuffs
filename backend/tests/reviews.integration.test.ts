@@ -112,6 +112,18 @@ test('keeps one rating per user per media via upsert constraint', async () => {
     expect(summary.body.userRating).toBe(9);
 });
 
+test('allows a user to clear their rating', async () => {
+    const response = await authed(
+        request(app).delete(`/api/reviews/${mediaType}/${tmdbId}/rating`),
+        ownerUser
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.summary.ratingsCount).toBe(0);
+    expect(response.body.summary.summary.averageRating).toBeNull();
+    expect(response.body.summary.userRating).toBeNull();
+});
+
 test('supports replies and likes on review comments', async () => {
     const rootCommentResponse = await authed(
         request(app)

@@ -2,6 +2,7 @@ import express, { RequestHandler } from 'express';
 import {
     createComment,
     createReply,
+    deleteRating,
     deleteComment,
     getComments,
     getReviewSummary,
@@ -45,6 +46,14 @@ router.put(
     requireTrustedOrigin as RequestHandler,
     reviewWriteLimiter as RequestHandler,
     upsertRating as RequestHandler
+);
+
+router.delete(
+    '/:mediaType/:tmdbId/rating',
+    requireAuth as RequestHandler,
+    requireTrustedOrigin as RequestHandler,
+    reviewWriteLimiter as RequestHandler,
+    deleteRating as RequestHandler
 );
 
 router.post(

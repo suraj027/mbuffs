@@ -1,3 +1,21 @@
+# Baidu's JS-rendering crawler walks every movie/person page 24/7 and each
+# page-view fires a full burst of API calls (kept our Neon compute awake and
+# forced DB writes via the public OMDB endpoint). English-language app —
+# Baidu SEO has negligible value, and the crawl cost is real.
+User-agent: Baiduspider
+Disallow: /
+
+# AI training crawlers — same cost profile, no referral value.
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Google-Extended
+User-agent: Bytespider
+User-agent: PerplexityBot
+User-agent: Amazonbot
+User-agent: meta-externalagent
+Disallow: /
+
 User-agent: Googlebot
 Allow: /
 

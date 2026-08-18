@@ -176,7 +176,6 @@ const Index = () => {
               {(isRecommendationsLoading || isLoadingWatched || isLoadingNotInterested) ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
-                    <div className="h-6 w-1 rounded-full bg-primary" />
                     <Skeleton className="h-7 w-32 rounded-lg" />
                     <Sparkles className="h-5 w-5 text-primary" />
                   </div>
@@ -196,7 +195,6 @@ const Index = () => {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="h-6 w-1 rounded-full bg-primary" />
                       <h2 className="text-xl md:text-2xl font-semibold tracking-tight">For You</h2>
                       <Sparkles className="h-5 w-5 text-primary" />
                       <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">

@@ -188,7 +188,6 @@ export function SystemCollectionItemsPage({ kind }: SystemCollectionItemsPagePro
           </Link>
 
           <div className="flex items-center gap-3 mb-2">
-            <div className="h-8 w-1 rounded-full bg-primary" />
             {icon}
             <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{title}</h1>
           </div>

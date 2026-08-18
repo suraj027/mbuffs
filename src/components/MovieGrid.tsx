@@ -52,7 +52,6 @@ export function MovieGrid({ movies, title, showNotInterested = false, hideItemsW
     <div className="space-y-6">
       {title && (
         <div className="flex items-center gap-3">
-          <div className="h-6 w-1 rounded-full bg-primary" />
           <h2 className="text-xl md:text-2xl font-semibold tracking-tight">{title}</h2>
         </div>
       )}

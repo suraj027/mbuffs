@@ -7,7 +7,8 @@ import {
     updateCollectionSchema,
     addMovieSchema,
     addCollaboratorSchema,
-    updateCollaboratorSchema
+    updateCollaboratorSchema,
+    bulkOperationSchema
 } from '../lib/validators.js';
 
 import {
@@ -21,6 +22,8 @@ import {
     expireRecommendationCacheByCollection,
     warmPersonalizedRecommendationCache
 } from '../services/recommendationService.js';
+import { createNotification } from '../services/notificationService.js';
+import { scheduleBackground } from '../lib/waitUntilHelper.js';
 
 interface CollectionDetailsResponse {
     collection: CollectionSummary;
@@ -269,20 +272,22 @@ export const deleteCollection = async (req: Request, res: Response, next: NextFu
 export const addMovieToCollection = async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.userId;
     const { collectionId } = req.params;
-    if (!userId) { 
+    if (!userId) {
         res.sendStatus(401);
         return;
     }
     try {
         // Check if user is owner or has edit permission
         const permissionCheck = await sql`
-            SELECT 
-                CASE 
+            SELECT
+                CASE
                     WHEN c.owner_id = ${userId} THEN 'owner'
                     WHEN cc.permission = 'edit' THEN 'edit'
                     WHEN cc.permission = 'view' THEN 'view'
                     ELSE NULL
-                END as role
+                END as role,
+                c.name as collection_name,
+                c.owner_id
             FROM collections c
             LEFT JOIN collection_collaborators cc ON c.id = cc.collection_id AND cc.user_id = ${userId}
             WHERE c.id = ${collectionId}
@@ -304,7 +309,7 @@ export const addMovieToCollection = async (req: Request, res: Response, next: Ne
             res.status(400).json({ message: 'Validation failed', errors: validation.error.issues });
             return;
         }
-        const { movieId } = validation.data;
+        const { movieId, title, posterPath, mediaType } = validation.data;
         const newEntryId = generateId(21);
 
         try {
@@ -317,11 +322,51 @@ export const addMovieToCollection = async (req: Request, res: Response, next: Ne
             await expireRecommendationCacheByCollection(collectionId);
 
             res.status(201).json({ movieEntry: result[0] as {id: string, movie_id: number, added_at: string} });
+
+            // --- Notify other collection members (owner + collaborators, excluding the acting user) ---
+            const collectionName = permissionCheck[0].collection_name;
+            const ownerId = permissionCheck[0].owner_id;
+
+            const collaborators = (await sql`
+                SELECT cc.user_id FROM collection_collaborators cc
+                WHERE cc.collection_id = ${collectionId}
+            `) as Array<{ user_id: string }>;
+
+            const recipientIds = [
+                ...(ownerId && ownerId !== userId ? [ownerId] : []),
+                ...collaborators.map((c) => c.user_id).filter((uid) => uid !== userId),
+            ];
+
+            if (recipientIds.length > 0) {
+                const notifPayload = {
+                    collection_id: collectionId,
+                    collection_name: collectionName,
+                    tmdb_id: typeof movieId === 'string' ? movieId : String(movieId),
+                    media_type: mediaType || undefined,
+                    title: title || undefined,
+                    poster_path: posterPath || undefined,
+                };
+
+                scheduleBackground((async () => {
+                    for (const recipientId of recipientIds) {
+                        try {
+                            await createNotification({
+                                recipientId,
+                                senderId: userId,
+                                type: 'collection_item_added',
+                                payload: notifPayload,
+                            });
+                        } catch (err) {
+                            console.error('[notifications] Failed to notify collection member:', err);
+                        }
+                    }
+                })());
+            }
         } catch (insertError: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (insertError.code === '23505') { 
+            if (insertError.code === '23505') {
                 res.status(409).json({ message: 'Movie already exists in this collection' });
             } else {
-                next(insertError); 
+                next(insertError);
             }
         }
     } catch (error) {
@@ -386,6 +431,171 @@ export const removeMovieFromCollection = async (req: Request, res: Response, nex
         await expireRecommendationCacheByCollection(collectionId);
 
         res.status(204).send();
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ============================================================================
+// BULK ITEM ACTIONS (COPY / MOVE / REMOVE)
+// ============================================================================
+
+export const bulkItemAction = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.userId;
+    const { collectionId: sourceCollectionId } = req.params;
+    if (!userId) {
+        res.sendStatus(401);
+        return;
+    }
+    try {
+        const validation = bulkOperationSchema.safeParse(req.body);
+        if (!validation.success) {
+            res.status(400).json({ message: 'Validation failed', errors: validation.error.issues });
+            return;
+        }
+        const { action, movieIds, targetCollectionId } = validation.data;
+
+        if (action !== 'remove' && !targetCollectionId) {
+            res.status(400).json({ message: 'Target collection ID is required for copy/move' });
+            return;
+        }
+
+        if (action !== 'remove' && sourceCollectionId === targetCollectionId) {
+            res.status(400).json({ message: 'Source and target collections cannot be the same' });
+            return;
+        }
+
+        // --- Check source collection permissions ---
+        const sourceCheck = await sql`
+            SELECT c.owner_id, c.is_public, c.name,
+                CASE
+                    WHEN c.owner_id = ${userId} THEN 'owner'
+                    WHEN cc.permission = 'edit' THEN 'edit'
+                    WHEN cc.permission = 'view' THEN 'view'
+                    ELSE NULL
+                END as role
+            FROM collections c
+            LEFT JOIN collection_collaborators cc ON c.id = cc.collection_id AND cc.user_id = ${userId}
+            WHERE c.id = ${sourceCollectionId}
+        `;
+
+        if (sourceCheck.length === 0) {
+            res.status(404).json({ message: 'Source collection not found' });
+            return;
+        }
+
+        const sourceRole = sourceCheck[0].role as 'owner' | 'edit' | 'view' | null;
+        const sourceIsPublic = Boolean(sourceCheck[0].is_public);
+
+        if (action === 'move' || action === 'remove') {
+            if (!sourceRole || sourceRole === 'view') {
+                res.status(403).json({ message: `You need edit permission on the source collection to ${action} items` });
+                return;
+            }
+        } else {
+            if (!sourceRole && !sourceIsPublic) {
+                res.status(403).json({ message: 'You do not have access to the source collection' });
+                return;
+            }
+        }
+
+        // --- Check target collection permissions (skip for remove) ---
+        if (action !== 'remove' && targetCollectionId) {
+            const targetCheck = await sql`
+                SELECT c.owner_id, c.name, c.is_system,
+                    CASE
+                        WHEN c.owner_id = ${userId} THEN 'owner'
+                        WHEN cc.permission = 'edit' THEN 'edit'
+                        WHEN cc.permission = 'view' THEN 'view'
+                        ELSE NULL
+                    END as role
+                FROM collections c
+                LEFT JOIN collection_collaborators cc ON c.id = cc.collection_id AND cc.user_id = ${userId}
+                WHERE c.id = ${targetCollectionId}
+            `;
+
+            if (targetCheck.length === 0) {
+                res.status(404).json({ message: 'Target collection not found' });
+                return;
+            }
+
+            const targetRole = targetCheck[0].role as 'owner' | 'edit' | 'view' | null;
+            if (!targetRole || targetRole === 'view') {
+                res.status(403).json({ message: 'You need edit permission on the target collection' });
+                return;
+            }
+        }
+
+        // --- Fetch matching items from source ---
+        const sourceMovies = await sql`
+            SELECT movie_id, is_movie, added_by_user_id
+            FROM collection_movies
+            WHERE collection_id = ${sourceCollectionId}
+              AND movie_id = ANY(${movieIds}::text[])
+        ` as Array<{ movie_id: string; is_movie: boolean | null; added_by_user_id: string }>;
+
+        if (sourceMovies.length === 0) {
+            res.status(404).json({ message: 'No matching items found in the source collection' });
+            return;
+        }
+
+        // For move/remove by edit collaborator: only process items they added
+        let moviesToProcess = sourceMovies;
+        if ((action === 'move' || action === 'remove') && sourceRole === 'edit') {
+            moviesToProcess = sourceMovies.filter((m) => m.added_by_user_id === userId);
+        }
+
+        if (moviesToProcess.length === 0) {
+            res.status(403).json({ message: `You can only ${action} items that you added` });
+            return;
+        }
+
+        // --- Insert into target (skip for remove) ---
+        let addedCount = 0;
+        let skippedCount = 0;
+
+        if (action !== 'remove' && targetCollectionId) {
+            const ids = moviesToProcess.map(() => generateId(21));
+            const targetMovieIds = moviesToProcess.map((m) => m.movie_id);
+            const isMovies = moviesToProcess.map((m) => m.is_movie);
+
+            const insertResult = await sql`
+                INSERT INTO collection_movies (id, collection_id, movie_id, added_by_user_id, is_movie)
+                SELECT id, ${targetCollectionId}, movie_id, ${userId}, is_movie
+                FROM UNNEST(${ids}::text[], ${targetMovieIds}::text[], ${isMovies}::boolean[]) AS t(id, movie_id, is_movie)
+                ON CONFLICT (collection_id, movie_id) DO NOTHING
+                RETURNING movie_id
+            ` as Array<{ movie_id: string }>;
+
+            addedCount = insertResult.length;
+            skippedCount = moviesToProcess.length - addedCount;
+        }
+
+        // --- Remove from source (for move and remove) ---
+        let removedCount = 0;
+        if (action === 'move' || action === 'remove') {
+            const deleteMovieIds = moviesToProcess.map((m) => m.movie_id);
+            const deleteResult = await sql`
+                DELETE FROM collection_movies
+                WHERE collection_id = ${sourceCollectionId}
+                  AND movie_id = ANY(${deleteMovieIds}::text[])
+                RETURNING movie_id
+            ` as Array<{ movie_id: string }>;
+            removedCount = deleteResult.length;
+        }
+
+        // --- Expire recommendation caches ---
+        await expireRecommendationCacheByCollection(sourceCollectionId);
+        if (action !== 'remove' && targetCollectionId) {
+            await expireRecommendationCacheByCollection(targetCollectionId);
+        }
+
+        res.status(200).json({
+            action,
+            addedCount,
+            skippedCount,
+            removedCount,
+        });
     } catch (error) {
         next(error);
     }

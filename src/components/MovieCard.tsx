@@ -1,6 +1,6 @@
 import { Movie, UserPreferences } from "@/lib/types";
 import { fetchUserPreferencesApi, getImageUrl, toggleNotInterestedStatusApi, toggleWatchedStatusApi } from "@/lib/api";
-import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Star, Eye, EyeOff, MoreVertical, ThumbsDown, ThumbsUp, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +26,18 @@ interface MovieCardProps {
   showWatched?: boolean;
   /** Additional menu items to render after the watched option */
   additionalMenuItems?: ReactNode;
+  /** When true, clicking the card toggles selection instead of navigating */
+  selectionMode?: boolean;
+  /** Whether this card is currently selected (only relevant in selectionMode) */
+  isSelected?: boolean;
+  /** Callback when the card is clicked in selection mode */
+  onToggleSelect?: (movieId: string) => void;
+  /** Callback fired on a mobile long-press (used to enter selection mode) */
+  onLongPress?: (movieId: string) => void;
 }
+
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MOVE_THRESHOLD = 10;
 
 export function MovieCard({
   movie,
@@ -36,12 +47,12 @@ export function MovieCard({
   showNotInterested = false,
   hideIfNoPoster = false,
   showWatched = true,
-  additionalMenuItems
+  additionalMenuItems,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
+  onLongPress,
 }: MovieCardProps) {
-  if (hideIfNoPoster && !movie.poster_path) {
-    return null;
-  }
-
   const releaseYear = (movie.release_date || movie.first_air_date)
     ? new Date(movie.first_air_date || movie.release_date).getFullYear()
     : "Unknown";
@@ -72,7 +83,9 @@ export function MovieCard({
   const showMovieCardInfo = preferencesData?.preferences?.show_movie_card_info ?? false;
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
-  const lastPointerTypeRef = useRef<string>('');
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const menuItemClass = "cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/90 focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground";
 
   // Local optimistic overlays. We only use them while they differ from server props.
@@ -207,11 +220,85 @@ export function MovieCard({
     toggleNotInterestedMutation.mutate();
   };
 
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Long-press only makes sense before we're in selection mode
+    if (!onLongPress || selectionMode) return;
+    longPressFiredRef.current = false;
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      haptics.trigger('medium');
+      onLongPress(mediaId);
+    }, LONG_PRESS_MS);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.touches[0];
+    const dx = Math.abs(touch.clientX - touchStartRef.current.x);
+    const dy = Math.abs(touch.clientY - touchStartRef.current.y);
+    if (dx > LONG_PRESS_MOVE_THRESHOLD || dy > LONG_PRESS_MOVE_THRESHOLD) {
+      clearLongPressTimer();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    clearLongPressTimer();
+    touchStartRef.current = null;
+  };
+
+  if (hideIfNoPoster && !movie.poster_path) {
+    return null;
+  }
+
   return (
-    <Link to={navLink} className="group block card-glow rounded-xl transition-transform duration-300 group-hover:scale-[1.03]" onClick={() => haptics.trigger("success")}>
-      <div 
-        className="relative overflow-hidden rounded-xl bg-card border border-border/60"
-        onClick={onClick}
+    <Link
+      to={navLink}
+      className={`group block card-glow rounded-xl transition-transform duration-300 group-hover:scale-[1.03] ${onLongPress ? 'select-none [-webkit-touch-callout:none]' : ''}`}
+      onClick={(e) => {
+        // Swallow the click that follows a long-press so it doesn't navigate/toggle
+        if (longPressFiredRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          longPressFiredRef.current = false;
+          return;
+        }
+        haptics.trigger("success");
+        if (selectionMode && onToggleSelect) {
+          e.preventDefault();
+          onToggleSelect(mediaId);
+        }
+      }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      onContextMenu={(e) => { if (onLongPress) e.preventDefault(); }}
+    >
+      <div
+        className={`relative overflow-hidden rounded-xl bg-card border transition-all ${
+          isSelected
+            ? "border-primary ring-2 ring-primary/40"
+            : "border-border/60"
+        }`}
+        onClick={(e) => {
+          if (selectionMode && onToggleSelect) {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleSelect(mediaId);
+          } else {
+            onClick?.();
+          }
+        }}
       >
         {/* Poster Image */}
         <div className="aspect-2/3 relative overflow-hidden bg-muted">
@@ -229,6 +316,17 @@ export function MovieCard({
             <div className="absolute inset-0 bg-linear-to-t from-black/35 via-black/5 to-transparent" />
           )}
 
+          {/* Selection checkbox badge */}
+          {selectionMode && (
+            <div className={`absolute top-2 left-2 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 transition-all ${
+              isSelected
+                ? "bg-primary border-primary text-primary-foreground"
+                : "bg-background/70 border-white/80"
+            }`}>
+              {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+            </div>
+          )}
+
           {/* Reddit Badge (admin-toggleable) */}
           {isRedditRecommended && user?.role === 'admin' && (preferencesData?.preferences?.show_reddit_label ?? true) && (
             <div className="absolute top-2 left-2 z-20">
@@ -242,7 +340,7 @@ export function MovieCard({
           )}
 
           {/* Three-dot Menu */}
-          {isLoggedIn && (
+          {isLoggedIn && !selectionMode && (
             <div className="absolute top-2 right-2 z-20">
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger asChild>
@@ -252,18 +350,11 @@ export function MovieCard({
                     className={`h-7 w-7 rounded-full bg-background/70 border border-border/70 hover:bg-background/90 transition-opacity ${
                       menuOpen ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
                     }`}
-                    onPointerDown={(e) => {
-                      lastPointerTypeRef.current = e.pointerType;
-                      if (e.pointerType === 'touch') {
-                        e.preventDefault();
-                      }
-                    }}
                     onClick={(e) => {
+                      // Only keep the click from reaching the surrounding <Link>.
+                      // The dropdown handles its own open/close toggling.
                       e.preventDefault();
                       e.stopPropagation();
-                      if (lastPointerTypeRef.current === 'touch') {
-                        setMenuOpen(prev => !prev);
-                      }
                     }}
                   >
                     <MoreVertical className="h-4 w-4 text-foreground" />

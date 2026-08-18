@@ -1,293 +1,194 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
-import { GenreRow } from "@/components/GenreRow";
-import { fetchGenreListApi, fetchMoviesByGenreApi, fetchTvByGenreApi, fetchNowPlayingMoviesApi, fetchCategoryRecommendationsApi, fetchUserPreferencesApi, fetchUserRegion } from "@/lib/api";
-import { Genre, CategoryRecommendationsResponse } from "@/lib/types";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Film, Tv, Sparkles } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
-import { Link } from "react-router-dom";
+import { CategoryGrid } from "@/components/CategoryGrid";
 import {
-  CATEGORY_OVERVIEW_FETCH_LIMIT,
-  getCategoryRecommendationsOverviewQueryKey,
-  getPreferencesQueryKey,
-  getSharedPersonalizedTheatricalInfiniteQueryOptions,
-} from "@/lib/recommendationQueries";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Clapperboard, Sparkles, Tv } from "lucide-react";
+import { useCategoryItems, NOW_PLAYING_GENRE_ID } from "@/hooks/useCategoryItems";
 
-// Popular genres to feature (subset for better UX)
-// Movie genres: Horror (27), Thriller (53), Drama (18), Sci-Fi (878), Animation (16), Action (28), Comedy (35), Romance (10749)
-const FEATURED_MOVIE_GENRE_IDS = [27, 53, 18, 878, 16, 28, 35, 10749];
-// TV genres: Mystery (9648), Crime (80), Drama (18), Sci-Fi & Fantasy (10765), Animation (16), Action & Adventure (10759), Comedy (35), Documentary (99)
-// Note: TMDB doesn't have Horror/Thriller as separate TV genres - Mystery and Crime cover similar content
-const FEATURED_TV_GENRE_IDS = [9648, 80, 18, 10765, 16, 10759, 35, 99];
+type MediaType = "movie" | "tv";
+
+const isMediaType = (value: string | null): value is MediaType => value === "movie" || value === "tv";
+
+const SELECT_ITEM_CLASS = "text-base py-2.5 pl-3 [&_svg]:size-5";
 
 const Categories = () => {
-  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Fetch user preferences to check if category recommendations are enabled
-  const { data: preferencesData } = useQuery({
-    queryKey: getPreferencesQueryKey(user?.id),
-    queryFn: fetchUserPreferencesApi,
-    enabled: !!user,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
+  const typeParam = searchParams.get("type");
+  const mediaType: MediaType = isMediaType(typeParam) ? typeParam : "movie";
+  const genreId = searchParams.get("genre") ?? undefined;
+  const hasSelection = !!genreId;
 
-  const categoryRecommendationsEnabled = preferencesData?.preferences?.category_recommendations_enabled ?? false;
-  const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
-  const showPersonalized = Boolean(user && categoryRecommendationsEnabled && recommendationsEnabled);
+  const {
+    genres,
+    genreName,
+    isLoadingGenres,
+    showPersonalized,
+    showNotInterested,
+    visibleMovies,
+    watchedMap,
+    notInterestedMap,
+    totalResults,
+    isLoading,
+    isFetchingNextPage,
+    isInitialPagedLoad,
+    loadMoreRef,
+    preferencesReady,
+    preferredGenreId,
+    isLoadingPreferredGenre,
+  } = useCategoryItems({ mediaType, genreId, enabled: hasSelection });
+
+  const handleMediaTypeChange = useCallback(
+    (value: string) => {
+      if (!isMediaType(value) || value === mediaType) return;
+      // Genres differ between movies and TV, so clear the selection on switch.
+      setSearchParams({ type: value }, { replace: false });
+    },
+    [mediaType, setSearchParams],
+  );
+
+  const handleGenreChange = useCallback(
+    (value: string) => {
+      setSearchParams({ type: mediaType, genre: value }, { replace: false });
+    },
+    [mediaType, setSearchParams],
+  );
+
+  const sortedGenres = useMemo(
+    () => [...genres].sort((a, b) => a.name.localeCompare(b.name)),
+    [genres],
+  );
+
+  // Whether the current genre param maps to a real, selectable category.
+  const genreResolved =
+    hasSelection &&
+    (genreId === NOW_PLAYING_GENRE_ID || genres.some((g) => String(g.id) === genreId));
+
+  // Once genres load, ensure a valid category is selected. Defaults to the user's
+  // most preferred genre (falling back to the first alphabetically). Waits for the
+  // preferred genre to resolve so it doesn't select a fallback and then swap.
+  const defaultSelectionReady =
+    preferencesReady && (!showPersonalized || !isLoadingPreferredGenre);
+
+  useEffect(() => {
+    if (sortedGenres.length === 0 || !defaultSelectionReady) return;
+    const isValid =
+      genreId === NOW_PLAYING_GENRE_ID || sortedGenres.some((g) => String(g.id) === genreId);
+    if (isValid) return;
+
+    const preferredValid = preferredGenreId != null && sortedGenres.some((g) => g.id === preferredGenreId);
+    const target = preferredValid ? String(preferredGenreId) : String(sortedGenres[0].id);
+    setSearchParams({ type: mediaType, genre: target }, { replace: true });
+  }, [genreId, sortedGenres, mediaType, defaultSelectionReady, preferredGenreId, setSearchParams]);
+
+  const categoryPlaceholder = isLoadingGenres ? "Loading categories…" : "Choose a category";
+
+  // Reserve header space with skeletons until a real category resolves, so the
+  // grid never jumps down when the header fills in.
+  const showHeaderSkeleton = !genreResolved;
+  const gridLoading = !genreResolved || isLoading;
 
   return (
     <>
       <Navbar />
       <main className="container py-6 md:py-10">
-        {/* Header */}
-        <section className="mb-8 md:mb-12">
-          <div className="relative">
-            {/* Subtle gradient orb */}
-            <div className="absolute -top-20 -left-20 w-72 h-72 bg-primary/[0.06] rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -top-10 left-40 w-48 h-48 bg-muted/30 rounded-full blur-3xl pointer-events-none" />
+        {/* Selectors */}
+        <section className="mb-8 flex flex-col gap-2 sm:flex-row">
+          <Select value={mediaType} onValueChange={handleMediaTypeChange}>
+            <SelectTrigger
+              className="w-full sm:w-[170px] !h-12 rounded-lg px-4 text-base font-medium"
+              aria-label="Media type"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
+              <SelectItem value="movie" className={SELECT_ITEM_CLASS}>
+                <Clapperboard />
+                Movies
+              </SelectItem>
+              <SelectItem value="tv" className={SELECT_ITEM_CLASS}>
+                <Tv />
+                TV Shows
+              </SelectItem>
+            </SelectContent>
+          </Select>
 
-            <div className="relative">
-              <div className="flex items-center gap-3 mb-4">
-                <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight leading-[1.1]">
-                  Browse by <span className="text-gradient">Category</span>
-                </h1>
+          <Select value={genreId ?? ""} onValueChange={handleGenreChange} disabled={isLoadingGenres}>
+            <SelectTrigger
+              className="w-full sm:w-[260px] !h-12 rounded-lg px-4 text-base font-medium"
+              aria-label="Category"
+            >
+              <SelectValue placeholder={categoryPlaceholder} />
+            </SelectTrigger>
+            <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
+              {mediaType === "movie" && (
+                <>
+                  <SelectItem value={NOW_PLAYING_GENRE_ID} className={SELECT_ITEM_CLASS}>
+                    Theatrical Releases
+                  </SelectItem>
+                  <SelectSeparator />
+                </>
+              )}
+              {sortedGenres.map((genre) => (
+                <SelectItem key={genre.id} value={String(genre.id)} className={SELECT_ITEM_CLASS}>
+                  {genre.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+
+        {/* Results */}
+        <section>
+          <div className="flex items-center gap-3 mb-6 min-h-9">
+            {showHeaderSkeleton ? (
+              <Skeleton className="h-7 w-44 rounded-lg" />
+            ) : (
+              <>
+                <h2 className="text-2xl md:text-3xl font-bold tracking-tight">{genreName}</h2>
+                {totalResults > 0 && (
+                  <span className="text-sm text-muted-foreground">{totalResults.toLocaleString()}</span>
+                )}
                 {showPersonalized && (
-                  <Badge variant="secondary" className="bg-secondary/90 text-secondary-foreground border-border/70 gap-1">
+                  <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 gap-1">
                     <Sparkles className="h-3 w-3" />
                     Personalized
                   </Badge>
                 )}
+              </>
+            )}
+          </div>
+
+          <CategoryGrid
+            movies={visibleMovies}
+            mediaType={mediaType}
+            watchedMap={watchedMap}
+            notInterestedMap={notInterestedMap}
+            showNotInterested={showNotInterested}
+            isLoading={gridLoading}
+            isFetchingNextPage={isFetchingNextPage}
+            isInitialPagedLoad={isInitialPagedLoad}
+            loadMoreRef={loadMoreRef}
+            emptyState={
+              <div className="text-center py-16">
+                <p className="text-muted-foreground">No results found for this category.</p>
               </div>
-              <p className="text-lg text-muted-foreground max-w-md">
-                {showPersonalized 
-                  ? "Categories tailored to your taste based on your collections."
-                  : "Discover movies and TV shows organized by genre."}
-              </p>
-              {!showPersonalized && user && (
-                <p className="text-sm text-muted-foreground mt-2">
-                  <Link to="/profile" className="text-primary hover:underline">
-                    Enable personalized categories
-                  </Link>{" "}
-                  in your profile settings.
-                </p>
-              )}
-            </div>
-          </div>
+            }
+          />
         </section>
-
-        {/* Tabs for Movies / TV Shows */}
-        <Tabs defaultValue="movie" className="w-full">
-          <div className="flex justify-start overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-            <TabsList className="mb-8 w-max">
-              <TabsTrigger value="movie" className="gap-2 px-3">
-                <Film className="h-4 w-4" />
-                Movies
-              </TabsTrigger>
-              <TabsTrigger value="tv" className="gap-2 px-3">
-                <Tv className="h-4 w-4" />
-                TV Shows
-              </TabsTrigger>
-            </TabsList>
-          </div>
-
-          <TabsContent value="movie">
-            {showPersonalized ? (
-              <PersonalizedCategoriesContent userId={user?.id} mediaType="movie" showNotInterested={showPersonalized} />
-            ) : (
-              <GenreRowsContent mediaType="movie" featuredGenreIds={FEATURED_MOVIE_GENRE_IDS} showNotInterested={false} />
-            )}
-          </TabsContent>
-
-          <TabsContent value="tv">
-            {showPersonalized ? (
-              <PersonalizedCategoriesContent userId={user?.id} mediaType="tv" showNotInterested={showPersonalized} />
-            ) : (
-              <GenreRowsContent mediaType="tv" featuredGenreIds={FEATURED_TV_GENRE_IDS} showNotInterested={false} />
-            )}
-          </TabsContent>
-        </Tabs>
       </main>
     </>
   );
 };
-
-// Loading skeleton for categories
-function CategoriesLoadingSkeleton() {
-  return (
-    <div className="space-y-12">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-7 w-32 rounded-lg" />
-            <Skeleton className="h-5 w-16 rounded-md" />
-          </div>
-          <div className="flex gap-4 overflow-hidden">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
-                <Skeleton className="aspect-2/3 w-full rounded-xl" />
-                <Skeleton className="h-4 w-[75%] mt-3 rounded-md" />
-                <Skeleton className="h-3 w-[45%] mt-2 rounded-md" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Component to render personalized category recommendations
-const DISPLAY_LIMIT = 10;
-function PersonalizedCategoriesContent({ userId, mediaType, showNotInterested }: { userId?: string | null; mediaType: 'movie' | 'tv'; showNotInterested: boolean }) {
-  const { data, isLoading, isError } = useQuery<CategoryRecommendationsResponse>({
-    queryKey: getCategoryRecommendationsOverviewQueryKey(userId, mediaType, CATEGORY_OVERVIEW_FETCH_LIMIT),
-    queryFn: () => fetchCategoryRecommendationsApi(mediaType, CATEGORY_OVERVIEW_FETCH_LIMIT),
-    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
-    enabled: !!userId,
-  });
-
-  if (isLoading) {
-    return <CategoriesLoadingSkeleton />;
-  }
-
-  if (isError || !data || data.categories.length === 0) {
-    // Fallback to default categories if personalized fails or is empty
-    return (
-      <GenreRowsContent 
-        mediaType={mediaType} 
-        featuredGenreIds={mediaType === 'movie' ? FEATURED_MOVIE_GENRE_IDS : FEATURED_TV_GENRE_IDS} 
-        showNotInterested={showNotInterested}
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-12">
-      {mediaType === 'movie' && <PersonalizedTheatricalReleasesRow userId={userId} showNotInterested={showNotInterested} />}
-      {data.categories.map((category) => (
-        <GenreRow
-          key={`personalized-${mediaType}-${category.genre.id}`}
-          genre={category.genre}
-          movies={category.results}
-          mediaType={mediaType}
-          isLoading={false}
-          limit={DISPLAY_LIMIT}
-          isPersonalized
-          showNotInterested={showNotInterested}
-        />
-      ))}
-    </div>
-  );
-}
-
-// Component to render genre rows for a specific media type
-function GenreRowsContent({ mediaType, featuredGenreIds, showNotInterested = false }: { mediaType: 'movie' | 'tv'; featuredGenreIds: number[]; showNotInterested?: boolean }) {
-  // Fetch genre list
-  const { data: genreData, isLoading: isLoadingGenres } = useQuery({
-    queryKey: ['genres', mediaType],
-    queryFn: () => fetchGenreListApi(mediaType),
-    staleTime: 1000 * 60 * 60, // Cache for 1 hour
-  });
-
-  // Filter to featured genres and maintain order
-  const featuredGenres = featuredGenreIds
-    .map(id => genreData?.genres.find(g => g.id === id))
-    .filter((g): g is Genre => g !== undefined);
-
-  if (isLoadingGenres) {
-    return <CategoriesLoadingSkeleton />;
-  }
-
-  return (
-    <div className="space-y-12">
-      {mediaType === 'movie' && <TheatricalReleasesRow showNotInterested={showNotInterested} />}
-      {featuredGenres.map((genre) => (
-        <GenreRowWithData
-          key={`${mediaType}-${genre.id}`}
-          genre={genre}
-          mediaType={mediaType}
-          showNotInterested={showNotInterested}
-        />
-      ))}
-    </div>
-  );
-}
-
-// Separate component to fetch data for each genre row
-function GenreRowWithData({ genre, mediaType, showNotInterested = false }: { genre: Genre; mediaType: 'movie' | 'tv'; showNotInterested?: boolean }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['genre', mediaType, genre.id, 'preview'],
-    queryFn: () => mediaType === 'movie'
-      ? fetchMoviesByGenreApi(genre.id, 1)
-      : fetchTvByGenreApi(genre.id, 1),
-    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
-  });
-
-  return (
-    <GenreRow
-      genre={genre}
-      movies={data?.results || []}
-      mediaType={mediaType}
-      isLoading={isLoading}
-      limit={10}
-      showNotInterested={showNotInterested}
-    />
-  );
-}
-
-function TheatricalReleasesRow({ showNotInterested = false }: { showNotInterested?: boolean }) {
-  const { data: userRegion } = useQuery({
-    queryKey: ['userRegion'],
-    queryFn: fetchUserRegion,
-    staleTime: Infinity,
-  });
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['movies', 'now_playing', userRegion ?? null],
-    queryFn: () => fetchNowPlayingMoviesApi(1, userRegion),
-    staleTime: 1000 * 60 * 30, // 30 minutes
-  });
-
-  return (
-    <GenreRow
-      title="Theatrical Releases"
-      movies={data?.results || []}
-      mediaType="movie"
-      isLoading={isLoading}
-      limit={10}
-      customLink="/categories/movie/now-playing"
-      showNotInterested={showNotInterested}
-    />
-  );
-}
-
-function PersonalizedTheatricalReleasesRow({ userId, showNotInterested = true }: { userId?: string | null; showNotInterested?: boolean }) {
-  const { data: userRegion } = useQuery({
-    queryKey: ['userRegion'],
-    queryFn: fetchUserRegion,
-    staleTime: Infinity,
-  });
-
-  const { data, isLoading } = useInfiniteQuery({
-    ...getSharedPersonalizedTheatricalInfiniteQueryOptions(userId, userRegion),
-    enabled: !!userId,
-  });
-
-  return (
-    <GenreRow
-      title="Theatrical Releases"
-      movies={data?.pages[0]?.results ?? []}
-      mediaType="movie"
-      isLoading={isLoading}
-      limit={10}
-      customLink="/categories/movie/now-playing"
-      isPersonalized
-      showNotInterested={showNotInterested}
-    />
-  );
-}
 
 export default Categories;

@@ -6,12 +6,15 @@ import {
     searchMoviesApi,
     addMovieToCollectionApi,
     removeMovieFromCollectionApi,
+    bulkItemActionApi,
     addCollaboratorApi,
     updateCollaboratorApi,
     removeCollaboratorApi,
-    fetchTvDetailsApi
+    fetchTvDetailsApi,
+    fetchRecommendationCollectionsApi,
+    fetchUserPreferencesApi
 } from '@/lib/api';
-import { CollectionDetails, MovieDetails, CollectionCollaborator, CollectionMovieEntry, AddCollaboratorInput, UpdateCollaboratorInput, SearchResults, AddMovieInput, AddMovieResponse } from '@/lib/types';
+import { CollectionDetails, MovieDetails, CollectionCollaborator, CollectionMovieEntry, AddCollaboratorInput, UpdateCollaboratorInput, SearchResults, AddMovieInput, AddMovieResponse, BulkOperationResponse, RecommendationCollectionsResponse, UserPreferences } from '@/lib/types';
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +23,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getImageUrl } from "@/lib/api";
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
-import { Film, Trash2, UserPlus, Loader2, Check, UserMinus, Plus, Search as SearchIcon, MoreVertical, LogOut, LogIn, X } from 'lucide-react';
+import { Film, Trash2, UserPlus, Loader2, Check, UserMinus, Plus, Search as SearchIcon, MoreVertical, LogOut, LogIn, X, CheckSquare, Copy, FolderInput } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -36,6 +39,12 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useWatchedStatus } from '@/hooks/useWatchedStatus';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { BulkActionBar } from '@/components/collection/BulkActionBar';
+import { CollectionPickerDialog } from '@/components/collection/CollectionPickerDialog';
+import { useWarmRecommendations } from '@/App';
+import { getPreferencesQueryKey } from '@/lib/recommendationQueries';
+
+const RECOMMENDATION_COLLECTIONS_QUERY_KEY = ['recommendations', 'collections'];
 
 const frontendAddCollaboratorSchema = z.object({
     email: z.string().email("Invalid email address"),
@@ -67,8 +76,13 @@ const CollectionDetail = () => {
     });
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [isBannerDismissed, setIsBannerDismissed] = useState(false);
+    const [isSelectMode, setIsSelectMode] = useState(false);
+    const [selectedMovieIds, setSelectedMovieIds] = useState<Set<string>>(new Set());
+    const [pickerState, setPickerState] = useState<{ action: 'copy' | 'move'; movieIds: string[] } | null>(null);
 
     const collectionQueryKey = ['collection', collectionId];
+
+    const { warmRecommendations } = useWarmRecommendations();
 
     const {
         data: collectionDetails,
@@ -80,6 +94,36 @@ const CollectionDetail = () => {
         queryFn: () => fetchCollectionDetailsApi(collectionId!),
         enabled: !!collectionId,
     });
+
+    const { data: preferencesData } = useQuery<{ preferences: UserPreferences }, Error>({
+        queryKey: getPreferencesQueryKey(currentUser?.id),
+        queryFn: fetchUserPreferencesApi,
+        enabled: isLoggedIn,
+        staleTime: 1000 * 60 * 5,
+    });
+    const recommendationsEnabled = preferencesData?.preferences?.recommendations_enabled ?? false;
+
+    // Warm the server recommendation cache only when an edited collection is
+    // one of the user's selected recommendation sources. Mirrors the gate on
+    // the Movie page so unrelated collection edits don't trigger a warm. The
+    // source list is read per-user, so collections shared with (and selected
+    // by) a collaborator are still covered.
+    const warmRecommendationsIfSource = useCallback(async (changedCollectionIds: (string | undefined)[]) => {
+        if (!recommendationsEnabled) return;
+        const ids = changedCollectionIds.filter((id): id is string => Boolean(id));
+        if (ids.length === 0) return;
+
+        const recommendationCollections = await queryClient.fetchQuery<RecommendationCollectionsResponse>({
+            queryKey: RECOMMENDATION_COLLECTIONS_QUERY_KEY,
+            queryFn: fetchRecommendationCollectionsApi,
+            staleTime: 1000 * 60 * 5,
+        }).catch(() => null);
+
+        const changedSource = recommendationCollections?.collections.some(({ id }) => ids.includes(id));
+        if (changedSource) {
+            warmRecommendations();
+        }
+    }, [recommendationsEnabled, queryClient, warmRecommendations]);
 
     const movieIds = collectionDetails?.movies.map(m => m.movie_id) ?? [];
     const {
@@ -184,13 +228,124 @@ const CollectionDetail = () => {
     // Mutations
     const removeMovieMutation = useMutation<void, Error, { collectionId: string; movieId: number | string }>({
         mutationFn: ({ collectionId, movieId }) => removeMovieFromCollectionApi(collectionId, movieId),
-        onSuccess: (_, { movieId }) => {
+        onSuccess: (_, { collectionId: changedCollectionId, movieId }) => {
             toast.success("Removed from collection.");
             queryClient.invalidateQueries({ queryKey: collectionQueryKey });
             queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', String(movieId)] });
+            void warmRecommendationsIfSource([changedCollectionId]);
         },
         onError: (error) => { toast.error(`Failed to remove: ${error.message}`); }
     });
+
+    // --- Multi-select helpers ---
+    const toggleSelect = useCallback((movieId: string) => {
+        setSelectedMovieIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(movieId)) {
+                next.delete(movieId);
+            } else {
+                next.add(movieId);
+            }
+            return next;
+        });
+    }, []);
+
+    // Long-press on mobile enters selection mode with that item selected
+    const handleLongPressSelect = useCallback((movieId: string) => {
+        setIsSelectMode(true);
+        setSelectedMovieIds((prev) => new Set(prev).add(movieId));
+    }, []);
+
+    const selectAll = useCallback(() => {
+        setSelectedMovieIds(new Set(filteredMedia.map((m) => String(m.movie_id))));
+    }, [filteredMedia]);
+
+    const clearSelection = useCallback(() => {
+        setSelectedMovieIds(new Set());
+    }, []);
+
+    const exitSelectMode = useCallback(() => {
+        setIsSelectMode(false);
+        setSelectedMovieIds(new Set());
+    }, []);
+
+    const isAllSelected = filteredMedia.length > 0 && filteredMedia.every((m) => selectedMovieIds.has(String(m.movie_id)));
+
+    // --- Bulk copy/move/remove mutation ---
+    const bulkOperationMutation = useMutation<BulkOperationResponse, ApiError, { sourceCollectionId: string; action: 'copy' | 'move' | 'remove'; movieIds: string[]; targetCollectionId?: string }, { previousDetails?: CollectionDetails }>({
+        mutationFn: ({ sourceCollectionId, action, movieIds, targetCollectionId }) =>
+            bulkItemActionApi(sourceCollectionId, { action, movieIds, targetCollectionId }),
+        onMutate: async (variables) => {
+            // Optimistically remove items from the source for move and remove
+            if (variables.action !== 'move' && variables.action !== 'remove') return { previousDetails: undefined };
+
+            await queryClient.cancelQueries({ queryKey: collectionQueryKey });
+            const previousDetails = queryClient.getQueryData<CollectionDetails>(collectionQueryKey);
+            if (previousDetails) {
+                const affectedIds = new Set(variables.movieIds);
+                queryClient.setQueryData<CollectionDetails>(collectionQueryKey, {
+                    ...previousDetails,
+                    movies: previousDetails.movies.filter((m) => !affectedIds.has(String(m.movie_id))),
+                });
+            }
+            return { previousDetails };
+        },
+        onSuccess: (data, variables) => {
+            const count = variables.action === 'remove' ? data.removedCount : data.addedCount;
+            const verb = variables.action === 'copy' ? 'Copied' : variables.action === 'move' ? 'Moved' : 'Removed';
+            let msg = `${verb} ${count} ${count === 1 ? 'item' : 'items'}`;
+            if (variables.action !== 'remove' && data.skippedCount > 0) {
+                msg += ` · ${data.skippedCount} already there`;
+            }
+            toast.success(msg);
+
+            queryClient.invalidateQueries({ queryKey: collectionQueryKey });
+            if (variables.targetCollectionId) {
+                queryClient.invalidateQueries({ queryKey: ['collection', variables.targetCollectionId] });
+            }
+            queryClient.invalidateQueries({ queryKey: ['collections'] });
+            variables.movieIds.forEach((id) => {
+                queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', id] });
+            });
+
+            void warmRecommendationsIfSource([variables.sourceCollectionId, variables.targetCollectionId]);
+
+            setPickerState(null);
+            exitSelectMode();
+        },
+        onError: (error, variables, context) => {
+            if (context?.previousDetails) {
+                queryClient.setQueryData<CollectionDetails>(collectionQueryKey, context.previousDetails);
+            }
+            toast.error(error?.data?.message || error.message || 'Operation failed');
+        },
+    });
+
+    const handleBulkAction = useCallback((action: 'copy' | 'move' | 'remove') => {
+        if (!collectionId || selectedMovieIds.size === 0) return;
+        const movieIds = Array.from(selectedMovieIds);
+        if (action === 'remove') {
+            bulkOperationMutation.mutate({ sourceCollectionId: collectionId, action, movieIds });
+        } else {
+            // Defer so the triggering dropdown menu fully closes before the dialog opens
+            setTimeout(() => setPickerState({ action, movieIds }), 0);
+        }
+    }, [collectionId, selectedMovieIds, bulkOperationMutation]);
+
+    const openSingleItemPicker = useCallback((action: 'copy' | 'move', movieId: string | number) => {
+        const ids = [String(movieId)];
+        setTimeout(() => setPickerState({ action, movieIds: ids }), 0);
+    }, []);
+
+    const handlePickerConfirm = useCallback((targetCollectionId: string) => {
+        if (!collectionId || !pickerState || pickerState.movieIds.length === 0) return;
+        bulkOperationMutation.mutate({
+            sourceCollectionId: collectionId,
+            action: pickerState.action,
+            movieIds: pickerState.movieIds,
+            targetCollectionId,
+        });
+    }, [collectionId, pickerState, bulkOperationMutation]);
 
     const { register: registerCollab, handleSubmit: handleSubmitCollab, reset: resetCollab, setValue: setCollabValue, watch: watchCollab, formState: { errors: collabErrors } } = useForm<FrontendAddCollaboratorInput>({
         resolver: zodResolver(frontendAddCollaboratorSchema),
@@ -278,6 +433,7 @@ const CollectionDetail = () => {
         onSuccess: (data, variables) => {
             toast.success(`Added to collection.`);
             queryClient.invalidateQueries({ queryKey: ['collections', 'movie-status', String(variables.data.movieId)] });
+            void warmRecommendationsIfSource([variables.collectionId]);
         },
         onError: (error, _variables, context) => {
             if (context?.didOptimisticUpdate && context.optimisticMovieId) {
@@ -651,20 +807,33 @@ const CollectionDetail = () => {
                         <span className="text-sm text-muted-foreground">{filteredMedia.length} items</span>
                     </div>
                     
-                    {canEdit && (
-                        <Dialog open={isAddMovieOpen} onOpenChange={setIsAddMovieOpen}>
-                            <DialogTrigger asChild>
-                                <Button size="sm" className="gap-1.5 px-3.5 has-[>svg]:px-3.5">
-                                    <Plus className="h-4 w-4" />
-                                    <span className="hidden sm:inline">Add</span>
-                                </Button>
-                            </DialogTrigger>
-                            <AddMovieDialog
-                                existingMovieIds={movieIds.map((id) => String(id))}
-                                onAddMovie={(movieId) => addMovieMutation.mutateAsync({ collectionId: collectionId!, data: { movieId: movieId as unknown as number } })}
-                            />
-                        </Dialog>
-                    )}
+                    <div className="flex items-center gap-2">
+                        {isLoggedIn && !isSelectMode && filteredMedia.length > 0 && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 px-3.5 has-[>svg]:px-3.5"
+                                onClick={() => setIsSelectMode(true)}
+                            >
+                                <CheckSquare className="h-4 w-4" />
+                                <span className="hidden sm:inline">Select</span>
+                            </Button>
+                        )}
+                        {canEdit && !isSelectMode && (
+                            <Dialog open={isAddMovieOpen} onOpenChange={setIsAddMovieOpen}>
+                                <DialogTrigger asChild>
+                                    <Button size="sm" className="gap-1.5 px-3.5 has-[>svg]:px-3.5">
+                                        <Plus className="h-4 w-4" />
+                                        <span className="hidden sm:inline">Add</span>
+                                    </Button>
+                                </DialogTrigger>
+                                <AddMovieDialog
+                                    existingMovieIds={movieIds.map((id) => String(id))}
+                                    onAddMovie={(movieId, title, posterPath, mediaType) => addMovieMutation.mutateAsync({ collectionId: collectionId!, data: { movieId: movieId as unknown as number, title, posterPath, mediaType } })}
+                                />
+                            </Dialog>
+                        )}
+                    </div>
                 </div>
 
                 {/* Grid */}
@@ -688,27 +857,61 @@ const CollectionDetail = () => {
                                      collectionDetails.collaborators.some(c => c.user_id === movieEntry.added_by_user_id);
                                 // Owner can remove any item, edit members can only remove their own items
                                 const canRemoveItem = isOwner || movieEntry.added_by_user_id === currentUser?.id;
-                                const isItemWatched = watchedMap[String(movieEntry.movie_id)] ?? false;
-                                const showRemoveOption = canEdit && canRemoveItem;
+                                 const isItemWatched = watchedMap[String(movieEntry.movie_id)] ?? false;
+                                const canMoveOrRemove = canEdit && canRemoveItem && !isSelectMode;
+                                const showItemActions = isLoggedIn && !isSelectMode;
+                                const movieIdStr = String(movieEntry.movie_id);
                                     return (
                                     <div key={movieEntry.movie_id} className="relative group">
                                         <MovieCard 
                                             movie={movie} 
                                             isWatched={isItemWatched}
                                             hideIfNoPoster={false}
-                                            additionalMenuItems={showRemoveOption ? (
-                                                <DropdownMenuItem
-                                                    className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-destructive focus:bg-destructive/10 focus:text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
-                                                    disabled={removeMovieMutation.isPending && removeMovieMutation.variables?.movieId === movieEntry.movie_id}
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        removeMovieMutation.mutate({ collectionId: collectionId!, movieId: movieEntry.movie_id });
-                                                    }}
-                                                >
-                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                    Remove
-                                                </DropdownMenuItem>
+                                            selectionMode={isSelectMode}
+                                            isSelected={selectedMovieIds.has(movieIdStr)}
+                                            onToggleSelect={toggleSelect}
+                                            onLongPress={isLoggedIn ? handleLongPressSelect : undefined}
+                                            additionalMenuItems={showItemActions ? (
+                                                <>
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            openSingleItemPicker('copy', movieEntry.movie_id);
+                                                        }}
+                                                    >
+                                                        <Copy className="mr-2 h-4 w-4" />
+                                                        Copy
+                                                    </DropdownMenuItem>
+                                                    {canMoveOrRemove && (
+                                                        <DropdownMenuItem
+                                                            className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                openSingleItemPicker('move', movieEntry.movie_id);
+                                                            }}
+                                                        >
+                                                            <FolderInput className="mr-2 h-4 w-4" />
+                                                            Move
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {canMoveOrRemove && (
+                                                        <DropdownMenuItem
+                                                            className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-medium text-destructive focus:bg-destructive/10 focus:text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
+                                                            disabled={removeMovieMutation.isPending && removeMovieMutation.variables?.movieId === movieEntry.movie_id}
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                removeMovieMutation.mutate({ collectionId: collectionId!, movieId: movieEntry.movie_id });
+                                                            }}
+                                                        >
+                                                            <Trash2 className="mr-2 h-4 w-4" />
+                                                            Remove
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                </>
                                             ) : undefined}
                                         />
                                         {movieEntry.added_by_username && (
@@ -748,6 +951,29 @@ const CollectionDetail = () => {
                     </div>
                 )}
             </main>
+
+            {isSelectMode && (
+                <BulkActionBar
+                    selectedCount={selectedMovieIds.size}
+                    isAllSelected={isAllSelected}
+                    canEdit={canEdit}
+                    isProcessing={bulkOperationMutation.isPending}
+                    onSelectAll={selectAll}
+                    onClearSelection={clearSelection}
+                    onExit={exitSelectMode}
+                    onRequestAction={handleBulkAction}
+                />
+            )}
+
+            <CollectionPickerDialog
+                open={pickerState !== null}
+                onOpenChange={(open) => { if (!open) setPickerState(null); }}
+                action={pickerState?.action ?? 'copy'}
+                itemCount={pickerState?.movieIds.length ?? 0}
+                sourceCollectionId={collectionId!}
+                isProcessing={bulkOperationMutation.isPending}
+                onConfirm={handlePickerConfirm}
+            />
         </>
     );
 };
@@ -756,7 +982,7 @@ const CollectionDetail = () => {
 // --- Add Movie Dialog Component ---
 interface AddMovieDialogProps {
     existingMovieIds: string[];
-    onAddMovie: (movieId: string) => Promise<unknown>;
+    onAddMovie: (movieId: string, title: string, posterPath: string | null, mediaType: 'movie' | 'tv') => Promise<unknown>;
 }
 
 const AddMovieDialog: React.FC<AddMovieDialogProps> = ({ existingMovieIds, onAddMovie }) => {
@@ -784,10 +1010,10 @@ const AddMovieDialog: React.FC<AddMovieDialogProps> = ({ existingMovieIds, onAdd
         initialPageParam: 1,
     });
 
-    const handleAddClick = async (movieId: string) => {
+    const handleAddClick = async (movieId: string, title: string, posterPath: string | null, mediaType: 'movie' | 'tv') => {
         setPendingMovieIds((prev) => new Set(prev).add(movieId));
         try {
-            await onAddMovie(movieId);
+            await onAddMovie(movieId, title, posterPath, mediaType);
         } finally {
             setPendingMovieIds((prev) => {
                 const next = new Set(prev);
@@ -873,7 +1099,7 @@ const AddMovieDialog: React.FC<AddMovieDialogProps> = ({ existingMovieIds, onAdd
                                 <Button 
                                     size="icon" 
                                     variant={alreadyAdded ? "secondary" : "default"} 
-                                    onClick={() => handleAddClick(movieId as string)} 
+                                    onClick={() => handleAddClick(movieId as string, movie.name || movie.title || '', movie.poster_path || null, movieId.endsWith('tv') ? 'tv' : 'movie')} 
                                     disabled={alreadyAdded || isPendingForItem}
                                     className="shrink-0 h-8 w-8"
                                 >

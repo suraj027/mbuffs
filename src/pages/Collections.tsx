@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchUserCollectionsApi, createCollectionApi, deleteCollectionApi, updateCollectionApi, fetchMovieDetailsApi, fetchTvDetailsApi } from '@/lib/api';
-import { UserCollectionsResponse, CreateCollectionInput, CollectionSummary, UpdateCollectionInput, MovieDetails } from '@/lib/types';
+import { fetchUserCollectionsApi, createCollectionApi, deleteCollectionApi, updateCollectionApi } from '@/lib/api';
+import { UserCollectionsResponse, CreateCollectionInput, CollectionSummary, UpdateCollectionInput } from '@/lib/types';
+import { CollectionPreview } from '@/components/collection/CollectionPreview';
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
@@ -19,7 +20,6 @@ import { z } from 'zod';
 import { useState } from 'react';
 import { toast } from "sonner";
 import { useAuth } from '@/hooks/useAuth';
-import { getImageUrl } from '@/lib/api';
 
 const frontendCreateCollectionSchema = z.object({
   name: z.string().min(1, "Collection name cannot be empty").max(255),
@@ -36,112 +36,6 @@ const frontendUpdateCollectionSchema = z.object({
 type FrontendUpdateCollectionInput = z.input<typeof frontendUpdateCollectionSchema>;
 
 const COLLECTIONS_QUERY_KEY = ['collections', 'user'];
-
-// Component to display movie poster collage
-const CollectionPreview = ({ movieIds }: { movieIds?: (number | string)[] }) => {
-  // Fetch movie details for up to 4 movies
-  const { data: moviesData } = useQuery({
-    queryKey: ['preview-movies', movieIds],
-    queryFn: async () => {
-      if (!movieIds || movieIds.length === 0) return [];
-      const promises = movieIds.slice(0, 4).map((id) => {
-        const idStr = String(id);
-        if (idStr.includes('tv')) {
-          const numericId = parseInt(idStr.replace('tv', ''), 10);
-          return fetchTvDetailsApi(numericId).catch(() => null);
-        } else {
-          return fetchMovieDetailsApi(Number(id)).catch(() => null);
-        }
-      });
-      return Promise.all(promises);
-    },
-    enabled: !!movieIds && movieIds.length > 0,
-    staleTime: 1000 * 60 * 60, // Cache for 1 hour
-  });
-
-  const posters = moviesData?.filter(Boolean).map(m => m?.poster_path) ?? [];
-  
-  if (posters.length === 0) {
-    return (
-      <div className="h-14 w-14 rounded-lg bg-muted flex items-center justify-center shrink-0">
-        <Film className="h-6 w-6 text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (posters.length === 1) {
-    return (
-      <div className="h-14 w-14 rounded-lg overflow-hidden shrink-0 bg-muted">
-        <img 
-          src={getImageUrl(posters[0], 'w92')} 
-          alt="" 
-          className="h-full w-full object-cover"
-        />
-      </div>
-    );
-  }
-
-  // 2 posters - side by side (2 columns)
-  if (posters.length === 2) {
-    return (
-      <div className="h-14 w-14 rounded-lg overflow-hidden shrink-0 grid grid-cols-2 gap-0.5 bg-muted">
-        {posters.map((poster, i) => (
-          <div key={i} className="overflow-hidden bg-muted">
-            <img 
-              src={getImageUrl(poster, 'w92')} 
-              alt="" 
-              className="h-full w-full object-cover"
-            />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  // 3 posters - 1 large on left, 2 stacked on right
-  if (posters.length === 3) {
-    return (
-      <div className="h-14 w-14 rounded-lg overflow-hidden shrink-0 grid grid-cols-2 gap-0.5 bg-muted">
-        <div className="row-span-2 overflow-hidden bg-muted">
-          <img 
-            src={getImageUrl(posters[0], 'w92')} 
-            alt="" 
-            className="h-full w-full object-cover"
-          />
-        </div>
-        <div className="overflow-hidden bg-muted">
-          <img 
-            src={getImageUrl(posters[1], 'w92')} 
-            alt="" 
-            className="h-full w-full object-cover"
-          />
-        </div>
-        <div className="overflow-hidden bg-muted">
-          <img 
-            src={getImageUrl(posters[2], 'w92')} 
-            alt="" 
-            className="h-full w-full object-cover"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // 4 posters - 2x2 grid
-  return (
-    <div className="h-14 w-14 rounded-lg overflow-hidden shrink-0 grid grid-cols-2 grid-rows-2 gap-0.5 bg-muted">
-      {posters.slice(0, 4).map((poster, i) => (
-        <div key={i} className="overflow-hidden bg-muted">
-          <img 
-            src={getImageUrl(poster, 'w92')} 
-            alt="" 
-            className="h-full w-full object-cover"
-          />
-        </div>
-      ))}
-    </div>
-  );
-};
 
 const Collections = () => {
   const queryClient = useQueryClient();

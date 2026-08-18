@@ -26,6 +26,8 @@ export interface Movie {
   overview: string;
   backdrop_path: string | null;
   imdb_rating?: number | null;
+  /** TMDB genre ids for this item. By convention genre_ids[0] is the primary genre. */
+  genre_ids?: number[];
   explainability?: {
     reason_codes: string[];
     source_appearances: number;
@@ -386,7 +388,6 @@ export interface RecommendationCacheDebugResponse {
     entries: RecommendationCacheDebugEntry[];
   };
   ttl_minutes: number;
-  allowed_debug_email: string;
 }
 
 export type RecommendationCacheDebugInvalidateMode = 'soft' | 'hard';
@@ -461,6 +462,9 @@ export interface UpdateCollectionInput {
 // Input type for adding a movie to a collection
 export interface AddMovieInput {
   movieId: number; // TMDB movie ID
+  title?: string;
+  posterPath?: string | null;
+  mediaType?: 'movie' | 'tv';
 }
 
 // Response type after adding a movie
@@ -470,6 +474,20 @@ export interface AddMovieResponse {
     movie_id: number;
     added_at: string;
   }
+}
+
+// Bulk copy/move/remove operation
+export interface BulkOperationInput {
+  action: 'copy' | 'move' | 'remove';
+  movieIds: string[];
+  targetCollectionId?: string;
+}
+
+export interface BulkOperationResponse {
+  action: 'copy' | 'move';
+  addedCount: number;
+  skippedCount: number;
+  removedCount: number;
 }
 
 // Input type for adding a collaborator
@@ -582,7 +600,7 @@ export interface OmdbRatingsResponse {
 
 // --- Notification & Share Types ---
 
-export type NotificationType = 'media_share' | 'recommendation';
+export type NotificationType = 'media_share' | 'recommendation' | 'collection_item_added';
 
 export interface MediaSharePayload {
   tmdb_id: number;
@@ -590,6 +608,15 @@ export interface MediaSharePayload {
   title: string;
   poster_path: string | null;
   message?: string;
+}
+
+export interface CollectionItemAddedPayload {
+  collection_id: string;
+  collection_name: string;
+  tmdb_id?: string;
+  media_type?: 'movie' | 'tv';
+  title?: string;
+  poster_path?: string | null;
 }
 
 export interface NotificationItem {

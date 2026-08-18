@@ -47,6 +47,47 @@ const decodeCursor = (cursor: string): { createdAt: string; id: string } | null 
     }
 };
 
+function buildPushPayload(
+    type: string,
+    id: string,
+    senderName: string,
+    payload: Record<string, string>
+): PushPayload {
+    const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
+
+    switch (type) {
+        case 'collection_item_added': {
+            const collectionName = (payload.collection_name as string) || 'a collection';
+            const title = (payload.title as string) || '';
+            return {
+                title: `${senderName} added to "${collectionName}"`,
+                body: title || 'Check it out!',
+                icon: payload.poster_path
+                    ? `${IMAGE_BASE_URL}/w92${payload.poster_path}`
+                    : undefined,
+                url: payload.collection_id
+                    ? `/collection/${payload.collection_id}`
+                    : undefined,
+                tag: `collection-item-${id}`,
+            };
+        }
+        case 'media_share':
+        default: {
+            return {
+                title: `${senderName} shared with you`,
+                body: (payload.title as string) || 'Check it out!',
+                icon: payload.poster_path
+                    ? `${IMAGE_BASE_URL}/w92${payload.poster_path}`
+                    : undefined,
+                url: payload.media_type === 'person'
+                    ? `/person/${payload.tmdb_id}`
+                    : `/media/${payload.media_type}/${payload.tmdb_id}`,
+                tag: `share-${id}`,
+            };
+        }
+    }
+}
+
 export async function createNotification(params: {
     recipientId: string;
     senderId: string | null;
@@ -69,18 +110,7 @@ export async function createNotification(params: {
             const senderName = senderResult[0]?.name || 'Someone';
             const payload = params.payload as Record<string, string>;
 
-            const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
-            const pushPayload: PushPayload = {
-                title: `${senderName} shared with you`,
-                body: (payload.title as string) || 'Check it out!',
-                icon: payload.poster_path
-                    ? `${IMAGE_BASE_URL}/w92${payload.poster_path}`
-                    : undefined,
-                url: payload.media_type === 'person'
-                    ? `/person/${payload.tmdb_id}`
-                    : `/media/${payload.media_type}/${payload.tmdb_id}`,
-                tag: `share-${id}`,
-            };
+            const pushPayload = buildPushPayload(params.type, id, senderName, payload);
 
             sendPushToUser(params.recipientId, pushPayload).catch((err) => {
                 console.error('[notifications] Push delivery failed:', err);

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Navbar } from '@/components/Navbar';
 import {
@@ -975,11 +975,11 @@ const formatDateTime = (value: string | null) => {
   });
 };
 
-const formatRelative = (value: string | null) => {
+const formatRelative = (value: string | null, now: number) => {
   if (!value) return 'n/a';
   const ms = new Date(value).getTime();
   if (Number.isNaN(ms)) return value;
-  const diffMs = ms - Date.now();
+  const diffMs = ms - now;
   const absMs = Math.abs(diffMs);
   const absSeconds = Math.round(absMs / 1000);
   if (absSeconds < 60) return diffMs >= 0 ? `in ${absSeconds}s` : `${absSeconds}s ago`;
@@ -1032,7 +1032,11 @@ const CacheDebugTab = () => {
 
   const cache = data?.cache;
   const entries = cache?.entries ?? [];
-  const nowMs = Date.now();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const activeEntries = entries.filter((entry) => entry.slot === 'active');
   const stagingEntries = entries.filter((entry) => entry.slot === 'staging');
   const activeFresh = activeEntries.filter((entry) => new Date(entry.expires_at).getTime() > nowMs).length;
@@ -1049,7 +1053,7 @@ const CacheDebugTab = () => {
             Debug view for recommendation snapshots (TTL: {data?.ttl_minutes ?? 30} minutes).
           </p>
         </div>
-        <Button onClick={() => refetch()} disabled={isFetching || isMutating} variant="outline">
+        <Button onClick={() => { setNowMs(Date.now()); void refetch(); }} disabled={isFetching || isMutating} variant="outline">
           <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -1128,13 +1132,13 @@ const CacheDebugTab = () => {
                         <p className="text-xs text-muted-foreground break-all">{entry.cache_key}</p>
                         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-1">
-                            <Clock3 className="h-3 w-3" /> Expires {formatDateTime(entry.expires_at)} ({formatRelative(entry.expires_at)})
+                            <Clock3 className="h-3 w-3" /> Expires {formatDateTime(entry.expires_at)} ({formatRelative(entry.expires_at, nowMs)})
                           </span>
                           <span>Created {formatDateTime(entry.created_at)}</span>
                           <span>Updated {formatDateTime(entry.updated_at)}</span>
                           <span>
                             Generation started {formatDateTime(entry.generation_started_at)}
-                            {entry.generation_started_at ? ` (${formatRelative(entry.generation_started_at)})` : ''}
+                            {entry.generation_started_at ? ` (${formatRelative(entry.generation_started_at, nowMs)})` : ''}
                           </span>
                         </div>
                       </div>

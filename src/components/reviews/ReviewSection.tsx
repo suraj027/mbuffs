@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import {
     createCommentApi,
     createReplyApi,
+    deleteRatingApi,
     deleteCommentApi,
     fetchCommentsApi,
     fetchReviewSummaryApi,
@@ -49,10 +50,10 @@ const STAR_SIZE = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-6 w-6' } as const;
 
 /** Rating tier — maps a 1–10 rating to a descriptive label and color scheme. */
 export function getRatingTier(rating: number) {
-    if (rating <= 2) return { label: 'Skip It', color: 'text-red-400', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/20', starColor: 'fill-red-400 text-red-400', starHoverColor: 'fill-red-300 text-red-300' };
-    if (rating <= 4) return { label: 'Meh', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/20', starColor: 'fill-orange-400 text-orange-400', starHoverColor: 'fill-orange-300 text-orange-300' };
-    if (rating <= 6) return { label: 'Decent', color: 'text-emerald-400', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20', starColor: 'fill-emerald-400 text-emerald-400', starHoverColor: 'fill-emerald-300 text-emerald-300' };
-    if (rating <= 8) return { label: 'Must Watch', color: 'text-violet-400', bgColor: 'bg-violet-500/10', borderColor: 'border-violet-500/20', starColor: 'fill-violet-400 text-violet-400', starHoverColor: 'fill-violet-300 text-violet-300' };
+    if (rating < 3) return { label: 'Skip It', color: 'text-red-400', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/20', starColor: 'fill-red-400 text-red-400', starHoverColor: 'fill-red-300 text-red-300' };
+    if (rating < 5) return { label: 'Meh', color: 'text-orange-400', bgColor: 'bg-orange-500/10', borderColor: 'border-orange-500/20', starColor: 'fill-orange-400 text-orange-400', starHoverColor: 'fill-orange-300 text-orange-300' };
+    if (rating < 8) return { label: 'Decent', color: 'text-emerald-400', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20', starColor: 'fill-emerald-400 text-emerald-400', starHoverColor: 'fill-emerald-300 text-emerald-300' };
+    if (rating < 10) return { label: 'Must Watch', color: 'text-violet-400', bgColor: 'bg-violet-500/10', borderColor: 'border-violet-500/20', starColor: 'fill-violet-400 text-violet-400', starHoverColor: 'fill-violet-300 text-violet-300' };
     return { label: 'Masterpiece', color: 'text-amber-300', bgColor: 'bg-amber-400/15', borderColor: 'border-amber-400/25', starColor: 'fill-amber-400 text-amber-400', starHoverColor: 'fill-amber-300 text-amber-300' };
 }
 
@@ -95,7 +96,7 @@ export function InteractiveStarRating({
     readoutClassName,
 }: {
     value: number | null;
-    onChange: (rating: number) => void;
+    onChange: (rating: number | null) => void;
     disabled?: boolean;
     starSize?: string;
     className?: string;
@@ -332,13 +333,25 @@ export function InteractiveStarRating({
                 {activeRating > 0 && (() => {
                     const tier = getRatingTier(activeRating);
                     return (
-                        <span className={cn(
-                            'text-[11px] font-medium transition-all duration-150',
-                            tier.color,
-                            hoverRating !== null ? 'opacity-80' : ''
-                        )}>
-                            {tier.label}
-                        </span>
+                        <>
+                            <span className={cn(
+                                'text-[11px] font-medium transition-all duration-150',
+                                tier.color,
+                                hoverRating !== null ? 'opacity-80' : ''
+                            )}>
+                                {tier.label}
+                            </span>
+                            {value !== null && (
+                                <button
+                                    type="button"
+                                    className="text-[11px] text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+                                    onClick={() => onChange(null)}
+                                    aria-label="Clear rating"
+                                >
+                                    Clear rating
+                                </button>
+                            )}
+                        </>
                     );
                 })()}
             </div>
@@ -519,7 +532,9 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
     };
 
     const rateMutation = useMutation({
-        mutationFn: (rating: number) => upsertRatingApi(mediaType, tmdbId, rating),
+        mutationFn: (rating: number | null) => rating === null
+            ? deleteRatingApi(mediaType, tmdbId)
+            : upsertRatingApi(mediaType, tmdbId, rating),
         onMutate: async (nextRating) => {
             await queryClient.cancelQueries({ queryKey: summaryQueryKey });
 
@@ -532,14 +547,18 @@ export const ReviewSection = ({ mediaType, tmdbId }: ReviewSectionProps) => {
             const previousRatingsCount = previousSummary.summary.ratingsCount;
             const previousAverageRating = previousSummary.summary.averageRating ?? 0;
 
-            const nextRatingsCount = previousUserRating == null
-                ? previousRatingsCount + 1
-                : previousRatingsCount;
+            const nextRatingsCount = nextRating === null
+                ? Math.max(0, previousRatingsCount - (previousUserRating == null ? 0 : 1))
+                : previousUserRating == null
+                    ? previousRatingsCount + 1
+                    : previousRatingsCount;
 
             const baseTotalScore = previousAverageRating * previousRatingsCount;
-            const adjustedTotalScore = previousUserRating == null
-                ? baseTotalScore + nextRating
-                : baseTotalScore - previousUserRating + nextRating;
+            const adjustedTotalScore = nextRating === null
+                ? baseTotalScore - (previousUserRating ?? 0)
+                : previousUserRating == null
+                    ? baseTotalScore + nextRating
+                    : baseTotalScore - previousUserRating + nextRating;
 
             const nextAverageRating = nextRatingsCount > 0
                 ? Number((adjustedTotalScore / nextRatingsCount).toFixed(1))

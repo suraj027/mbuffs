@@ -14,6 +14,7 @@
     "db:diff": "drizzle-kit push --verbose --strict",
     "db:studio": "drizzle-kit studio",
     "scrape:reddit": "node scripts/scrapeReddit.mjs",
+    "import:imdb-list": "node scripts/importImdbList.mjs",
     "test:integration": "NODE_ENV=test node db/migrate.mjs && NODE_ENV=test vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "NODE_ENV=test vitest --config vitest.integration.config.ts"
   },
@@ -23,11 +24,10 @@
   "description": "",
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",
-    "@openai/codex-sdk": "0.141.0",
+    "@openai/codex-sdk": "0.145.0",
     "@opentelemetry/api": "1.9.1",
-    "@vercel/functions": "3.7.1",
-    "better-auth": "1.6.20",
-    "cheerio": "1.2.0",
+    "@vercel/functions": "3.7.6",
+    "better-auth": "1.6.25",
     "cookie-parser": "1.4.7",
     "cors": "2.8.6",
     "dotenv": "17.4.2",
@@ -41,13 +41,19 @@
     "@types/cookie-parser": "1.4.10",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.6",
-    "@types/node": "26.0.0",
-    "@types/supertest": "7.2.0",
+    "@types/node": "26.1.1",
+    "@types/supertest": "7.2.1",
     "@types/web-push": "3.6.4",
     "drizzle-kit": "0.31.10",
     "supertest": "7.2.2",
     "ts-node-dev": "2.0.0",
     "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "vitest": "4.1.10"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.7": true
   }
 }

@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -212,7 +212,7 @@ const buildCollectionImage = async (posters: string[]) => {
     ];
   }
 
-  const tileComposites: sharp.OverlayOptions[] = [];
+  const tileComposites: OverlayOptions[] = [];
   for (const [i, posterUrl] of posters.entries()) {
     const tile = tiles[i];
     if (!tile) break;
